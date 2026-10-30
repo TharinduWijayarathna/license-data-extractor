@@ -14,14 +14,14 @@ use flight\Engine;
  */
 class PostController
 {
-    /** @var Engine<object> */
+    /** @var Engine */
     private $app;
 
     /** @var SimplePdo */
     private $db;
 
     /**
-     * @param Engine<object> $app
+     * @param Engine $app
      */
     public function __construct(Engine $app, SimplePdo $db)
     {

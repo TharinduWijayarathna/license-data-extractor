@@ -139,7 +139,6 @@ class MigrateCommandTest extends TestCase
 
         $cmd = new MigrateCommand([]);
         $method = new \ReflectionMethod(MigrateCommand::class, 'splitSql');
-        $method->setAccessible(true);
         /** @var array<int,string> $statements */
         $statements = $method->invoke($cmd, $sql);
 

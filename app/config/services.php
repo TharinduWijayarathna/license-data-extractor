@@ -4,7 +4,7 @@
  * Services + Dice DI wiring.
  *
  * Bootstrap (web) provides:
- *   @var \flight\Engine<object> $app
+ *   @var \flight\Engine $app
  *   @var \App\Utils\Config      $config
  *   @var string                 $projectRoot
  *   @var string                 $ds

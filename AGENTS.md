@@ -211,7 +211,7 @@ composer check
 
 ## PHP version
 
-App code targets portable style (avoid 8.1-only syntax in application classes when easy). Some Composer deps (e.g. Runway 1.x) may require newer PHP for CLI.
+**PHP 8.4+** is required (`composer.json` `"php": "^8.4"`, with `config.platform.php` pinned to 8.4.1 so the lock file stays installable on 8.4 hosts).
 
 ---
 

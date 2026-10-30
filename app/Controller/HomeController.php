@@ -14,14 +14,14 @@ use flight\Engine;
  */
 class HomeController
 {
-    /** @var Engine<object> */
+    /** @var Engine */
     private $app;
 
     /** @var Config */
     private $config;
 
     /**
-     * @param Engine<object> $app
+     * @param Engine $app
      */
     public function __construct(Engine $app, Config $config)
     {

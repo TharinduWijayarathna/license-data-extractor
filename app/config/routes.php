@@ -4,7 +4,7 @@
  * Application routes.
  *
  * @var \flight\net\Router $router
- * @var \flight\Engine<object> $app
+ * @var \flight\Engine $app
  * @var \App\Utils\Config $config
  */
 

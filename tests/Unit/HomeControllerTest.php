@@ -13,22 +13,12 @@ class HomeControllerTest extends TestCase
 {
     public function testIndexRendersWelcomeViaEngine(): void
     {
-        // render() is a mapped Engine method (via __call), not a real method
-        $app = $this->getMockBuilder(Engine::class)
-            ->disableOriginalConstructor()
-            ->addMethods(['render'])
-            ->getMock();
-
-        $app->expects($this->once())
-            ->method('render')
-            ->with(
-                'welcome',
-                $this->callback(static function (array $data): bool {
-                    return isset($data['message'], $data['env'], $data['debug'])
-                        && $data['env'] === 'testing'
-                        && $data['debug'] === true;
-                })
-            );
+        // render() is a mappable Engine method: capture it instead of mocking
+        $rendered = [];
+        $app = new Engine();
+        $app->map('render', function (string $template, array $data = []) use (&$rendered): void {
+            $rendered[] = [$template, $data];
+        });
 
         $config = new Config([
             'app' => [
@@ -39,5 +29,12 @@ class HomeControllerTest extends TestCase
 
         $controller = new HomeController($app, $config);
         $controller->index();
+
+        $this->assertCount(1, $rendered);
+        [$template, $data] = $rendered[0];
+        $this->assertSame('welcome', $template);
+        $this->assertArrayHasKey('message', $data);
+        $this->assertSame('testing', $data['env']);
+        $this->assertTrue($data['debug']);
     }
 }

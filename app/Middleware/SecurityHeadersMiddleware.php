@@ -12,11 +12,11 @@ use Tracy\Debugger;
  */
 class SecurityHeadersMiddleware
 {
-    /** @var Engine<object> */
+    /** @var Engine */
     private $app;
 
     /**
-     * @param Engine<object> $app
+     * @param Engine $app
      */
     public function __construct(Engine $app)
     {

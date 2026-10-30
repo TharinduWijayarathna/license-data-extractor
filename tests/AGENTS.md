@@ -17,7 +17,7 @@ composer analyse   # PHPStan level 8
 ## Flight nuances (easy to get wrong)
 
 1. **Prefer unit tests** that construct controllers/middleware with a **mocked or real `Engine`**, not a full HTTP boot through `public/index.php`.
-2. **`render`, `json`, `response`, `request`** on Engine are often **mapped / magic (`__call`)**, not always real PHP methods. With PHPUnit mocks use `addMethods(['render'])` (or similar) for magic methods; use `onlyMethods` for real methods like `get` / `set`.
+2. **`render`, `json`, `response`, `request`** on Engine are often **mapped / magic (`__call`)**, not always real PHP methods. PHPUnit 12+ removed `addMethods()`: use a real `new Engine()` and capture mappable methods with `$app->map('render', fn (...) => ...)` (also `redirect`, `halt`, `json`); set request fields on `$app->request()` and assert on `$app->response()`.
 3. **Do not use `Flight::` statics** in tests if you can inject Engine — matches production app code.
 4. **No real external services** (SMTP, paid APIs). Mock them.
 5. **SQLite temp files** are fine for migration/DB helper tests; clean up in `tearDown`.
