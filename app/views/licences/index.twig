@@ -12,6 +12,10 @@
 {% endblock %}
 
 {% block body %}
+{% set in_flight = pending|filter(f => f.job and f.job.status != 'failed')|length %}
+{% if queue_enabled and (in_flight > 0 or processing) %}
+    <div data-poll="{{ base_url }}status" hidden></div>
+{% endif %}
 {# Thin progress line while an extraction request is running #}
 <div data-progress class="fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-accent-soft" hidden>
     <div class="h-full w-2/5 animate-run-progress bg-accent"></div>
@@ -51,7 +55,14 @@
         <section class="panel">
             <div class="flex items-baseline justify-between border-b border-line px-4 py-3">
                 <h2 class="eyebrow">Inbox</h2>
-                <span class="font-mono text-[11px] text-muted">{{ pending|length }} waiting</span>
+                {% if processing %}
+                    <span class="flex items-center gap-1.5 font-mono text-[11px] text-accent">
+                        <span class="relative flex size-1.5"><span class="absolute inline-flex size-full animate-ping rounded-full bg-accent opacity-60"></span><span class="relative inline-flex size-1.5 rounded-full bg-accent"></span></span>
+                        processing
+                    </span>
+                {% else %}
+                    <span class="font-mono text-[11px] text-muted">{{ pending|length }} waiting</span>
+                {% endif %}
             </div>
 
             <form method="post" action="{{ base_url }}upload" enctype="multipart/form-data" data-busy="Uploading…" data-progress-trigger class="p-4">
@@ -71,28 +82,51 @@
             {% if pending is not empty %}
                 <ul class="max-h-60 overflow-y-auto border-t border-line">
                     {% for file in pending %}
-                        <li class="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
-                            <span class="w-9 shrink-0 font-mono text-[10px] font-medium text-muted uppercase">{{ file.name|split('.')|last }}</span>
+                        {% set job = file.job %}
+                        <li class="flex items-start gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
+                            <span class="w-9 shrink-0 pt-0.5 font-mono text-[10px] font-medium text-muted uppercase">{{ file.name|split('.')|last }}</span>
                             <span class="min-w-0 flex-1">
                                 <span class="block truncate" title="{{ file.name }}">{{ file.name }}</span>
-                                <span class="block font-mono text-[11px] text-faint">{{ (file.size / 1024)|round }} KB · {{ file.modified|date('j M H:i') }}</span>
+                                {% if not job %}
+                                    <span class="block font-mono text-[11px] text-faint">{{ (file.size / 1024)|round }} KB · {{ file.modified|date('j M H:i') }}</span>
+                                {% elseif job.status == 'processing' %}
+                                    <span class="block font-mono text-[11px] text-accent">extracting…</span>
+                                {% elseif job.status == 'queued' and job.available_at > now %}
+                                    <span class="block font-mono text-[11px] text-warn" title="{{ job.error }}">retry in {{ job.available_at - now }}s · attempt {{ job.attempts + 1 }} of {{ max_attempts }}</span>
+                                {% elseif job.status == 'queued' %}
+                                    <span class="block font-mono text-[11px] text-muted">queued</span>
+                                {% elseif job.status == 'failed' %}
+                                    <span class="block text-[11px] leading-snug text-danger" title="{{ job.error }}">Failed after {{ job.attempts }} attempt{{ job.attempts == 1 ? '' : 's' }}: {{ job.error|length > 90 ? job.error|slice(0, 90) ~ '…' : job.error }}</span>
+                                {% endif %}
                             </span>
+                            {% if job and job.status == 'failed' %}
+                                <form method="post" action="{{ base_url }}jobs/{{ job.id }}/retry" class="shrink-0">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="text-[12px] font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink">Retry</button>
+                                </form>
+                            {% endif %}
                         </li>
                     {% endfor %}
                 </ul>
             {% endif %}
 
             <div class="border-t border-line p-4">
-                <form method="post" action="{{ base_url }}process" data-busy="Extracting…" data-progress-trigger>
+                {% set unqueued = pending|filter(f => not f.job)|length %}
+                <form method="post" action="{{ base_url }}process" data-busy="{{ queue_enabled ? 'Queuing…' : 'Extracting…' }}" data-progress-trigger>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="btn {{ pending is empty ? 'btn-quiet' : 'btn-primary' }} w-full" type="submit" {{ pending is empty or not has_api_key ? 'disabled' }}>
-                        {% if pending is empty %}Inbox is empty{% else %}Extract {{ pending|length }} document{{ pending|length == 1 ? '' : 's' }}{% endif %}
-                    </button>
+                    {% if pending is empty %}
+                        <button class="btn btn-quiet w-full" type="submit" disabled>Inbox is empty</button>
+                    {% elseif queue_enabled and unqueued == 0 %}
+                        <button class="btn btn-quiet w-full" type="submit" {{ not has_api_key ? 'disabled' }}>{{ in_flight > 0 ? 'Queued — processing in background' : 'Nothing new to queue' }}</button>
+                    {% else %}
+                        {% set count = queue_enabled ? unqueued : pending|length %}
+                        <button class="btn btn-primary w-full" type="submit" {{ not has_api_key ? 'disabled' }}>Extract {{ count }} document{{ count == 1 ? '' : 's' }}</button>
+                    {% endif %}
                 </form>
                 {% if not has_api_key %}
                     <p class="mt-3 text-[12px] text-danger">Set <code class="font-mono">GEMINI_API_KEY</code> in .env to enable extraction.</p>
                 {% else %}
-                    <p class="mt-3 font-mono text-[11px] leading-relaxed text-faint">{{ model }} · ~3 s per document<br>daily: php runway licences:process</p>
+                    <p class="mt-3 font-mono text-[11px] leading-relaxed text-faint">{{ model }} · ~3 s per document<br>{{ queue_enabled ? 'queue: background worker' : 'queue off: run php runway migrate' }}</p>
                 {% endif %}
             </div>
         </section>

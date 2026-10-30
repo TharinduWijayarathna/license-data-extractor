@@ -9,6 +9,7 @@ use App\Utils\Config;
 use flight\Engine;
 use flight\Session;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\QueueDatabase;
 
 class LicenceControllerTest extends TestCase
 {
@@ -26,8 +27,10 @@ class LicenceControllerTest extends TestCase
         foreach (glob($this->dir . '/incoming/*') ?: [] as $file) {
             unlink($file);
         }
+        @unlink($this->dir . '/incoming/.agent.lock');
         rmdir($this->dir . '/incoming');
         @unlink($this->dir . '/agent.log');
+        @unlink($this->dir . '/queue.sqlite');
         rmdir($this->dir);
     }
 
@@ -81,6 +84,59 @@ class LicenceControllerTest extends TestCase
         $this->assertStringContainsString('GEMINI_API_KEY', $flash['messages'][0]);
     }
 
+    public function testQueueModeQueuesInboxAndReportsStatus(): void
+    {
+        touch($this->dir . '/incoming/a.pdf');
+        touch($this->dir . '/incoming/b.docx');
+        $config = $this->queueConfig();
+        $session = $this->session();
+
+        $calls = [];
+        (new LicenceController($this->engine($calls), $config, $session))->process();
+
+        $flash = $session->get('licences_flash');
+        $this->assertIsArray($flash);
+        $this->assertSame('ok', $flash['type']);
+        $this->assertStringStartsWith('2 document(s) queued.', $flash['messages'][0]);
+        $this->assertSame([['/']], $calls['redirect']);
+
+        $calls = [];
+        (new LicenceController($this->engine($calls), $config, $session))->status();
+        $this->assertSame(2, $calls['json'][0][0]['in_flight']);
+        $this->assertFalse($calls['json'][0][0]['processing']);
+
+        $calls = [];
+        (new LicenceController($this->engine($calls), $config, $session))->index();
+        $data = $calls['render'][0][1];
+        $this->assertTrue($data['queue_enabled']);
+        $this->assertSame('queued', $data['pending'][0]['job']['status']);
+    }
+
+    public function testRetryOnlyAcceptsFailedJobs(): void
+    {
+        $config = $this->queueConfig();
+        $session = $this->session();
+
+        $calls = [];
+        (new LicenceController($this->engine($calls), $config, $session))->retry('999');
+
+        $flash = $session->get('licences_flash');
+        $this->assertIsArray($flash);
+        $this->assertSame('error', $flash['type']);
+    }
+
+    private function queueConfig(): Config
+    {
+        QueueDatabase::create('sqlite:' . $this->dir . '/queue.sqlite');
+
+        $data = $this->config()->all();
+        $data['gemini']['api_key'] = 'test-key';
+        $data['database'] = ['driver' => 'sqlite', 'file_path' => $this->dir . '/queue.sqlite'];
+        $data['licences']['queue'] = ['dispatch' => 'none'];
+
+        return new Config($data);
+    }
+
     private function config(): Config
     {
         return new Config([
@@ -110,7 +166,7 @@ class LicenceControllerTest extends TestCase
     private function engine(array &$calls): Engine
     {
         $app = new Engine();
-        foreach (['render', 'redirect'] as $method) {
+        foreach (['render', 'redirect', 'json'] as $method) {
             $app->map($method, function (...$args) use (&$calls, $method): void {
                 $calls[$method][] = $args;
             });

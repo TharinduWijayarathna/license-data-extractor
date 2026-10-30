@@ -54,6 +54,19 @@ return [
         'log_file' => __DIR__ . '/../log/licence_agent.log',
         // Per-file limit for web uploads (PHP's upload_max_filesize must allow it too)
         'max_upload_mb' => 20,
+        // Job queue (needs the database + `php runway migrate`; without it runs are synchronous)
+        'queue' => [
+            // background: web uploads start a detached `licences:process` run
+            // none: leave jobs for `licences:work` or the cron schedule
+            'dispatch' => 'background',
+            // CLI php used for background runs ('' = auto-detect)
+            'php_binary' => '',
+            'max_attempts' => 3,
+            // Retry back-off in seconds, doubled per attempt (60s, 120s, ...)
+            'retry_after' => 60,
+            // A job "processing" longer than this is assumed abandoned and re-queued
+            'stale_after' => 900,
+        ],
     ],
     'runway' => [
         'index_root' => 'public/index.php',

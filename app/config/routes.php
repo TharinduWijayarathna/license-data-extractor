@@ -21,6 +21,8 @@ $router->group('', function (Router $router) use ($config) {
         $router->post('/upload', [LicenceController::class, 'upload']);
         $router->post('/process', [LicenceController::class, 'process']);
         $router->get('/download', [LicenceController::class, 'download']);
+        $router->post('/jobs/@id:[0-9]+/retry', [LicenceController::class, 'retry']);
+        $router->get('/status', [LicenceController::class, 'status']);
     }, [CsrfMiddleware::class]);
 
     // Posts demo requires SimplePdo (PostController). Skip when DB is disabled.

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Service\LicenceAgent;
 use App\Service\LicenceAgentFactory;
 use App\Service\LicenceInbox;
 use App\Service\LicenceNormalizer;
+use App\Service\LicenceQueue;
 use App\Service\LicenceRecord;
 use App\Service\MasterWorkbook;
 use App\Utils\Config;
@@ -56,6 +58,8 @@ class LicenceController
         $this->session->delete(self::FLASH_KEY);
 
         $rows = $this->withExpiryStatus($exists ? MasterWorkbook::open($path)->rows() : []);
+        $queue = LicenceAgentFactory::queue($this->config);
+        $jobs = $queue !== null ? $queue->activeJobs() : [];
 
         $this->app->render('licences/index', [
             'columns' => LicenceRecord::COLUMNS,
@@ -67,7 +71,11 @@ class LicenceController
             'model' => (string) $this->config->get('gemini.model', ''),
             'exists' => $exists,
             'updated_at' => $exists ? (int) filemtime($path) : null,
-            'pending' => $inbox->pending(),
+            'pending' => $this->withJobs($inbox->pending(), $jobs),
+            'queue_enabled' => $queue !== null,
+            'processing' => LicenceAgent::isProcessingIn($this->incomingDir()),
+            'max_attempts' => $queue !== null ? $queue->maxAttempts() : 0,
+            'now' => time(),
             'max_upload_mb' => intdiv($inbox->maxBytes(), 1048576),
             'has_api_key' => LicenceAgentFactory::hasApiKey($this->config),
             'activity' => $this->recentLog(),
@@ -100,7 +108,13 @@ class LicenceController
 
         $messages = [];
         if ($stored !== []) {
-            $messages[] = count($stored) . ' file(s) added to the queue.';
+            $queue = LicenceAgentFactory::queue($this->config);
+            if ($queue !== null && LicenceAgentFactory::hasApiKey($this->config)) {
+                $queue->sync($stored);
+                $messages[] = count($stored) . ' document(s) queued. ' . $this->dispatch();
+            } else {
+                $messages[] = count($stored) . ' document(s) added to the inbox.';
+            }
         }
         $this->redirectWithFlash($errors === [] ? 'ok' : 'error', array_merge($messages, $errors));
     }
@@ -111,6 +125,18 @@ class LicenceController
             $this->redirectWithFlash('error', ['GEMINI_API_KEY is not set. Add it to .env and reload.']);
             return;
         }
+
+        // Queue mode: hand the inbox to the background processor and return at once
+        $queue = LicenceAgentFactory::queue($this->config);
+        if ($queue !== null) {
+            $queued = $queue->sync(array_column($this->inbox()->pending(), 'name'));
+            $this->redirectWithFlash('ok', [
+                ($queued > 0 ? "{$queued} document(s) queued. " : '') . $this->dispatch(),
+            ]);
+            return;
+        }
+
+        // No database: process synchronously within this request
 
         // One Gemini call per document; allow a long batch to finish
         set_time_limit(0);
@@ -145,6 +171,38 @@ class LicenceController
         $this->redirectWithFlash($summary['failed'] > 0 ? 'error' : 'ok', $messages);
     }
 
+    public function retry(string $id): void
+    {
+        $queue = LicenceAgentFactory::queue($this->config);
+        if ($queue === null || !$queue->retry((int) $id)) {
+            $this->redirectWithFlash('error', ['That job could not be retried — it may already be running.']);
+            return;
+        }
+
+        $this->redirectWithFlash('ok', ['Queued for another attempt. ' . $this->dispatch()]);
+    }
+
+    /**
+     * Lightweight JSON for the dashboard to poll while jobs are in flight.
+     */
+    public function status(): void
+    {
+        $queue = LicenceAgentFactory::queue($this->config);
+        $jobs = $queue !== null ? $queue->activeJobs() : [];
+        $master = $this->masterPath();
+
+        $inFlight = count(array_filter($jobs, function (array $job): bool {
+            return $job['status'] !== LicenceQueue::FAILED;
+        }));
+
+        $this->app->json([
+            'in_flight' => $inFlight,
+            'processing' => LicenceAgent::isProcessingIn($this->incomingDir()),
+            // Changes whenever a job moves on or the workbook is written
+            'version' => md5((string) json_encode([$jobs, is_file($master) ? filemtime($master) : 0])),
+        ]);
+    }
+
     public function download(): void
     {
         $path = $this->masterPath();
@@ -166,6 +224,46 @@ class LicenceController
     {
         $this->session->set(self::FLASH_KEY, ['type' => $type, 'messages' => $messages]);
         $this->app->redirect($this->config->baseUrl());
+    }
+
+    /**
+     * Start background processing per licences.queue.dispatch; returns a status sentence.
+     */
+    private function dispatch(): string
+    {
+        if (LicenceAgent::isProcessingIn($this->incomingDir())) {
+            return 'The worker will pick them up shortly.';
+        }
+        if ((string) $this->config->get('licences.queue.dispatch', 'background') !== 'background') {
+            return 'They will be processed by the worker or the next scheduled run.';
+        }
+
+        return LicenceAgentFactory::dispatcher($this->config)->dispatch()
+            ? 'Extracting in the background — this page updates automatically.'
+            : 'Could not start a background run; start `php runway licences:work` or wait for the schedule.';
+    }
+
+    /**
+     * Attach each inbox document's current job (if any).
+     *
+     * @param array<int,array{name:string,size:int,modified:int}> $pending
+     * @param array<string,array{id:int,status:string,attempts:int,available_at:int,error:?string}> $jobs
+     * @return array<int,array<string,mixed>>
+     */
+    private function withJobs(array $pending, array $jobs): array
+    {
+        $out = [];
+        foreach ($pending as $file) {
+            $file['job'] = $jobs[$file['name']] ?? null;
+            $out[] = $file;
+        }
+
+        return $out;
+    }
+
+    private function incomingDir(): string
+    {
+        return (string) $this->config->get('licences.incoming_dir', '');
     }
 
     /**

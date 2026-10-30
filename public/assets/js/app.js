@@ -120,6 +120,38 @@
         });
     }
 
+    // While jobs are queued or running, poll the status feed and reload when
+    // something changes (a job finished, failed or the workbook was written).
+    function initPolling() {
+        var hook = document.querySelector('[data-poll]');
+        if (!hook || !window.fetch) {
+            return;
+        }
+        var url = hook.getAttribute('data-poll');
+        var version = null;
+
+        function tick() {
+            fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+                .then(function (response) { return response.json(); })
+                .then(function (status) {
+                    var idle = status.in_flight === 0 && !status.processing;
+                    if (version !== null && status.version !== version) {
+                        window.location.reload();
+                        return;
+                    }
+                    if (idle && version !== null) {
+                        window.location.reload();
+                        return;
+                    }
+                    version = status.version;
+                    window.setTimeout(tick, 3000);
+                })
+                .catch(function () { window.setTimeout(tick, 10000); });
+        }
+
+        tick();
+    }
+
     function initDismiss() {
         document.querySelectorAll('[data-dismissible]').forEach(function (alert) {
             var button = alert.querySelector('[data-dismiss]');
@@ -134,4 +166,5 @@
     initBusyForms();
     initFilter();
     initDismiss();
+    initPolling();
 })();
