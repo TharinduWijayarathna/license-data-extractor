@@ -160,6 +160,8 @@ Unmapped env vars are ignored. Never put `$_ENV[...]` expressions in `config.php
 | `php runway migrate` | Apply pending migrations for the active driver (`.sql` or `.mysql.sql`) |
 | `php runway --help` | List commands that **exist** |
 | `php runway config:get` / `config:set` | File config (literals) |
+| `php runway licences:process` | Queue new documents and process all due jobs, then exit (cron) |
+| `php runway licences:work` | Long-running queue worker (`--sleep`, `--max-runtime`) |
 
 Do not document phantom commands. Do not build product around `ai:init` / `ai:generate-instructions`.
 

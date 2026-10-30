@@ -1,311 +1,208 @@
-# Flight PHP Skeleton
+# Licence Register
 
-Official starter for [Flight PHP](https://docs.flightphp.com) — a fast, simple, extensible micro-framework.
+Turns Sri Lankan vendor licence documents (`.docx` / `.pdf`, including scans) into one clean Excel
+register. Each document is read by the Gemini API, the business rules are applied in PHP, and every
+licence becomes a row in `Master_Licences.xlsx`, with no copy-typing.
 
-This repository is what you get from:
+| Column | Example | Rule |
+|---|---|---|
+| VLFileNumber | `LCS/VEN/4315/2024` | Trimmed, no spaces around slashes |
+| VLNumber | `0881/26/R` | Leading/trailing noise removed (`..0470/26/R` → `0470/26/R`) |
+| CompanyName | `ABC MOBILE (PVT) LTD` | Legal-entity brackets kept, wrapping brackets removed |
+| Address1 | `NO. 178, …, MATARA.`⏎`NO.48, …, BELIATTA.` | One premises per line, each ends with a period, ASCII `NO.` (never `№`) |
+| ExpireDate | `29/09/2027` | Effective date + 1 year − 1 day, a real date shown as DD/MM/YYYY, right-aligned |
+| LicenceType | `WD,WL excluding SAT,GPSVT` | WD = wired, WL = wireless; exclusions CP, SAT, GPSVT, RCT |
+| District | `HAMBANTOTA, MATARA` | Sri Lankan district per premises, upper case, de-duplicated, sorted |
 
-```bash
-composer create-project flightphp/skeleton cool-project-name
-```
+Rows are de-duplicated on **VLFileNumber + VLNumber**, so processing the same document twice never
+adds it twice.
 
-It is built so **you can write every line yourself**, following one clear application pattern, and so **AI coding tools succeed** when you choose to use them. Same codebase either way.
+## Features
 
----
-
-## Who this is for
-
-| You… | Start here |
-|------|------------|
-| Want to code the app yourself | [Quick start](#quick-start) → [How you work day to day](#how-you-work-day-to-day) → [Flight docs ↔ this skeleton](#flight-docs--this-skeleton) |
-| Use any AI coding agent | Same as above, then [AI-assisted development](#ai-assisted-development), root **`AGENTS.md`**, and **`SECURITY.md`** |
-| Are comparing to older Flight demos | [Flight docs ↔ this skeleton](#flight-docs--this-skeleton) |
-
-Flight’s **framework APIs** live in the docs and in `vendor/flightphp/core`. This skeleton’s job is a **default application layout** (folders, DI, config, views, models) so you are not inventing structure on day one.
-
----
+- **Web dashboard**: drop documents in, watch them get extracted, filter the register, see which
+  licences have expired or expire within 90 days, and download the workbook.
+- **Job queue**: every document is a job with automatic retries (back-off for Gemini rate limits),
+  a live status in the dashboard, and a **Retry** button for documents that failed.
+- **Unattended mode**: a daily scheduled run or an always-on worker processes anything placed in the
+  incoming folder, including a synced OneDrive / network folder.
+- **Accurate by design**: Gemini only reads facts off the page, using a strict JSON schema; all
+  formatting rules are applied in PHP (`App\Service\LicenceNormalizer`), so output is consistent.
 
 ## Requirements
 
-- PHP 8.1+ recommended (app code stays careful about syntax; some deps such as Runway 1.x need 8.2+)
+- PHP **8.4+** with `curl`, `zip`, `dom` and `pdo_sqlite` (or `pdo_mysql`)
 - Composer
-- `ext-json`, `ext-pdo` (`pdo_sqlite` for the default database)
+- A Gemini API key: free from [Google AI Studio](https://aistudio.google.com)
+- Node.js only if you change the UI styles
 
----
-
-## Create a project
-
-```bash
-composer create-project flightphp/skeleton cool-project-name
-cd cool-project-name
-```
-
-That step copies `config_sample.php` → `config.php`, `.env.example` → `.env` (when present), creates cache/log dirs, and writes `.runway-config.json` if needed.
-
----
-
-## Quick start
+## Getting started
 
 ```bash
-# Optional: edit .env or app/config/config.php
-composer start
-# → http://localhost:8000
-
-# Sample data (posts table + ActiveRecord example)
-php runway migrate
-# → http://localhost:8000/posts
-# → http://localhost:8000/api/posts
+git clone https://github.com/TharinduWijayarathna/license-data-extractor.git
+cd license-data-extractor
+composer install
+cp app/config/config_sample.php app/config/config.php
+cp .env.example .env            # then set GEMINI_API_KEY=...
+php runway migrate              # creates the job queue table (SQLite by default)
+composer start                  # → http://localhost:8000
 ```
 
-### Docker
+Upload a document on the dashboard, and the row appears in the register a few seconds later.
+
+## How processing works
+
+```
+upload / folder ──► incoming/ ──► job queue ──► processor ──► Gemini ──► rules ──► Master_Licences.xlsx
+                                  (database)    (one at a time)                     document → processed/
+```
+
+1. **Documents arrive** in `storage/licences/incoming/`, either uploaded on the dashboard or copied
+   into the folder directly (e.g. by OneDrive sync).
+2. **Each document becomes a job** in the `licence_jobs` table: *queued → processing → done*.
+3. **A processor works through the queue**, one document at a time (about 3 seconds each). Only one
+   processor runs at once; a lock file guarantees it, so the scheduler, the worker and the dashboard
+   never clash and never exceed Gemini's rate limits.
+4. **Success**: the new rows are appended to the workbook (written atomically) and the document
+   moves to `storage/licences/processed/`.
+5. **Failure**: the job is retried automatically (after 60 s, then 120 s, …, up to 3 attempts).
+   If it still fails, it is marked *failed* with the reason, the document stays in `incoming/`, and
+   you can press **Retry** on the dashboard once the problem is fixed. Every outcome is logged to
+   `app/log/licence_agent.log` and shown under **Activity**.
+
+**What starts a processor?**
+
+| Trigger | When to use |
+|---|---|
+| Dashboard upload or **Extract** | Starts a background run automatically, and the page updates itself as jobs finish. |
+| `php runway licences:process` | Processes everything queued (waiting for short retries), then exits. Ideal for a daily schedule. |
+| `php runway licences:work` | Stays running and picks documents up within seconds. Use on a server under a process manager. |
+
+If the database is not configured or not migrated, the app still works: it falls back to
+processing the incoming folder synchronously, as a single batch.
+
+## Running it unattended
+
+### Option A: daily schedule
 
 ```bash
-docker compose up -d
-# → http://localhost:8080
+# macOS / Linux (crontab -e): every day at 06:00
+0 6 * * * cd /path/to/license-data-extractor && php runway licences:process >/dev/null 2>&1
 ```
 
-### Vagrant
+On Windows, create a **Task Scheduler** task that runs `php.exe runway licences:process`, with
+*Start in* set to the project folder and *Run whether user is logged on or not* checked.
 
-```bash
-vagrant up
-# → http://localhost:8000
+### Option B: always-on worker
+
+```ini
+# /etc/systemd/system/licence-worker.service
+[Unit]
+Description=Licence Register queue worker
+
+[Service]
+WorkingDirectory=/path/to/license-data-extractor
+ExecStart=/usr/bin/php runway licences:work --sleep=5
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 ```
 
----
+The worker stops cleanly on `SIGTERM` / Ctrl+C after the current document. Use `--max-runtime=3600`
+to have it exit hourly so the process manager restarts it fresh. On Windows, run the same command as
+a service with [NSSM](https://nssm.cc). With a worker running you can set
+`LICENCE_QUEUE_DISPATCH=none`, so uploads just queue and leave the work to it.
+
+### OneDrive or a shared folder
+
+Point the folders at a synced location in `.env`:
+
+```dotenv
+LICENCE_INCOMING_DIR="C:\Users\me\OneDrive\Licensing\Incoming"
+LICENCE_PROCESSED_DIR="C:\Users\me\OneDrive\Licensing\Processed"
+LICENCE_MASTER_XLSX="C:\Users\me\OneDrive\Licensing\Master_Licences.xlsx"
+```
+
+Files dropped into the folder are queued on the next run (or within seconds when the worker runs).
+Close the workbook in Excel before a run; Windows cannot replace a file that is open.
+
+## Configuration
+
+Set these in `.env`; defaults live in `app/config/config.php` (`gemini.*`, `licences.*`).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | (none) | **Required** to extract documents |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Pinned model; `thinking_level` is `low` (fast and accurate for extraction) |
+| `LICENCE_INCOMING_DIR` | `storage/licences/incoming` | Documents waiting to be processed |
+| `LICENCE_PROCESSED_DIR` | `storage/licences/processed` | Documents already processed |
+| `LICENCE_MASTER_XLSX` | `storage/licences/Master_Licences.xlsx` | The register workbook |
+| `LICENCE_LOG_FILE` | `app/log/licence_agent.log` | Activity / error log |
+| `LICENCE_QUEUE_DISPATCH` | `background` | `background`: uploads start a run; `none`: leave jobs to the worker / schedule |
+| `LICENCE_PHP_BINARY` | auto | CLI `php` used for background runs, if auto-detection picks the wrong one |
+| `DB_DRIVER` / `DB_SQLITE_PATH` | `sqlite` / `database.sqlite` | Queue database (`mysql` supported, see `DB_*`) |
+| `APP_TIMEZONE` | `UTC` | e.g. `Asia/Colombo`, used for log times and expiry checks |
+| `APP_DEBUG` | `true` | Set `false` in production (hides the debug bar and error details) |
+
+Retry policy (`licences.queue.max_attempts`, `retry_after`, `stale_after`) and the upload size limit
+(`licences.max_upload_mb`, 20 MB) are in `config.php`.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `composer start` | Local web server on http://localhost:8000 (20 MB uploads allowed) |
+| `php runway migrate` | Create / update the database tables |
+| `php runway licences:process` | Process the queue once, then exit |
+| `php runway licences:work` | Run the queue worker continuously (`--sleep`, `--max-runtime`) |
+| `composer check` | Run the tests (PHPUnit) and static analysis (PHPStan level 8) |
+| `npm run build` | Rebuild the UI stylesheet and fonts after changing views |
 
 ## Project structure
 
 ```
-project-root/
-├── README.md             # You are here (humans first)
-├── AGENTS.md             # Root AI instructions (source of truth)
-├── SECURITY.md           # Security policy (secrets, headers, reporting)
-├── .env.example          # Documented env overlays (secrets / deploy)
-├── public/index.php      # Web entry only
-├── app/
-│   ├── config/           # bootstrap, routes, services + AGENTS.md
-│   ├── Utils/            # Config, Env, DatabaseFactory + AGENTS.md
-│   ├── Controller/       # App\Controller\* + AGENTS.md
-│   ├── Middleware/       # App\Middleware\* + AGENTS.md
-│   ├── Model/            # App\Model\* + AGENTS.md
-│   ├── commands/         # Runway CLI + AGENTS.md
-│   ├── views/            # Twig + AGENTS.md
-│   ├── cache/
-│   └── log/
-├── migrations/           # SQL + AGENTS.md
-└── tests/                # PHPUnit + AGENTS.md
+app/
+  commands/      licences:process, licences:work (Runway CLI)
+  config/        config, routes, services
+  Controller/    LicenceController: dashboard, upload, extract, retry, status feed
+  Middleware/    CSRF protection, security headers
+  Service/       the pipeline:
+                   GeminiLicenceExtractor  document → raw facts (Gemini, JSON schema)
+                   DocxTextExtractor       .docx → text (Gemini cannot read Word files)
+                   LicenceNormalizer       business rules → LicenceRecord
+                   MasterWorkbook          Excel register (PhpSpreadsheet)
+                   LicenceAgent            processes one document / a batch, locking
+                   LicenceQueue            job queue (licence_jobs table)
+                   LicenceWorker           runs queued jobs through the agent
+                   LicenceDispatcher       starts background runs from the web
+                   LicenceInbox            validated uploads, incoming folder listing
+  views/         Twig templates
+migrations/      SQL migrations (SQLite + MySQL pairs)
+public/          web root: index.php, built CSS, fonts, JS
+resources/css/   Tailwind source
+storage/licences incoming/, processed/, Master_Licences.xlsx (not committed)
+tests/           PHPUnit tests
 ```
 
-Namespaces are **`App\…`** (PascalCase folders: `Controller`, not `controllers`). Framework code stays **`flight\…`**.
+Built with [Flight](https://docs.flightphp.com) (PHP micro-framework), Twig, PhpSpreadsheet,
+Tailwind CSS and the Gemini API.
 
----
-
-## How you work day to day
-
-You do not need an AI tool. The loop is:
-
-1. **Route** — add a line in `app/config/routes.php`
-2. **Controller** — class under `app/Controller/` with constructor injection
-3. **View or JSON** — Twig under `app/views/`, or `$this->app->json(...)`
-4. **Database (optional)** — migration in `migrations/`, model under `app/Model/`, inject `SimplePdo`
-
-### Minimal controller
-
-```php
-namespace App\Controller;
-
-use flight\Engine;
-
-class HelloController
-{
-    private $app;
-
-    public function __construct(Engine $app)
-    {
-        $this->app = $app;
-    }
-
-    public function index(): void
-    {
-        $this->app->render('welcome', [
-            'message' => 'Hello from a controller',
-        ]);
-    }
-}
-```
-
-```php
-// app/config/routes.php
-$router->get('/hello', [HelloController::class, 'index']);
-```
-
-Dice builds the controller and injects the **same** `Engine` instance used at boot (see `app/config/services.php`). That matches Flight’s dependency-injection and unit-testing guidance: prefer `$app` / injected services over the static `Flight::` facade in application classes.
-
-### Configuration
-
-Three layers:
-
-1. **`.env`** — secrets and deploy overrides (`DB_PASSWORD`, `APP_ENV`, Docker)
-2. **`app/config/config.php`** — structured **literal** defaults (safe for `runway config:set`)
-3. **Bootstrap merge** — mapped env keys win when set (`App\Utils\Config::mergeEnv`)
-
-| Task | Where |
-|------|--------|
-| Local defaults / non-secret flags | `config.php` or `php runway config:set …` |
-| Secrets / production | `.env` (gitignored) |
-| Read file config | `php runway config:get` |
-
-Do **not** put `$_ENV[...]` expressions inside `config.php`. Runway rewrites that file as static PHP and would bake resolved values (including secrets) into the file.
-
-Full env→config map: **`AGENTS.md`**.
-
-### Useful commands
-
-| Command | Purpose |
-|---------|---------|
-| `composer start` | PHP built-in server on port 8000 |
-| `composer test` | PHPUnit |
-| `composer analyse` | PHPStan level 8 |
-| `composer check` | PHPUnit + PHPStan |
-| `php runway migrate` | Apply migrations for active driver (`.sql` / `.mysql.sql`) |
-| `php runway --help` | List CLI commands |
-| `php runway config:get` / `config:set` | File config helpers |
-
-Only rely on commands that actually appear in `php runway --help` for your install.
-
----
-
-## Stack (this skeleton’s defaults)
-
-| Concern | Choice | Why this default |
-|---------|--------|------------------|
-| Framework | [flightphp/core](https://docs.flightphp.com) (`Engine`, `SimplePdo`) | Long-term Flight APIs |
-| DI | [Dice](https://docs.flightphp.com/en/v3/learn/dependency-injection-container) + Engine substitutions | Testable controllers; official DI pattern |
-| Views | [Twig](https://twig.symfony.com/) | Wide ecosystem; `$app->render()` is mapped to Twig |
-| Models | [ActiveRecord](https://docs.flightphp.com/awesome-plugins/active-record) | One model story |
-| DB connection | [`SimplePdo`](https://docs.flightphp.com/en/v3/learn/simple-pdo) | Preferred over deprecated PdoWrapper |
-| Sessions | [flightphp/session](https://docs.flightphp.com/awesome-plugins/session) | Injectable; avoid raw `$_SESSION` |
-| CLI | [Runway](https://docs.flightphp.com/awesome-plugins/runway) | Migrations + scaffolding host |
-| Debugger | Tracy (+ tracy-extensions in dev) | Error UX in development |
-
-These are **deliberate product defaults for the official starter**, not the only way to use Flight. A micro app can still be a single file and `Flight::route()` — that path is documented in core docs / zip installs, not duplicated here.
-
----
-
-## Flight docs ↔ this skeleton
-
-Docs teach the **framework**. The skeleton fixes an **application shape** so copy-paste from tutorials does not fight the tree. When they differ, **prefer this repository’s layout for code you add under `app/`**, and use docs for method names, options, and plugins.
-
-| Topic | Docs often show | This skeleton expects |
-|-------|-----------------|------------------------|
-| Entry / demo style | `Flight::route(...)`, sometimes one-file | `public/index.php` → bootstrap → `routes.php` + controllers |
-| App handle | `Flight::…` static facade | Inject `flight\Engine $app` in controllers/middleware; bootstrap may still call `Flight::app()` |
-| Controllers | Various namespaces / ad hoc classes | `App\Controller\…` → `app/Controller/` |
-| Routing file | Inline in index or mixed | All HTTP routes in `app/config/routes.php` |
-| Views | Built-in PHP views, Latte examples, etc. | **Twig only** under `app/views/`; `$app->render('name', $data)` |
-| Database helper | Older **PdoWrapper** examples still around | **`SimplePdo`** (PdoWrapper is deprecated as of core 3.18) |
-| Models | Raw SQL, or ActiveRecord in plugin docs | ActiveRecord under `App\Model\`; connection is SimplePdo |
-| Config | Arrays, env snippets, register() | Literal `config.php` + `.env` overlay; inject `App\Utils\Config` |
-| DI | Optional / several containers | Dice wired in `services.php` with **Engine substitutions** |
-| Testing | Construct controller with `new Engine()` + mocks | Same idea; see `tests/Unit/` and the [unit testing guide](https://docs.flightphp.com/en/v3/guides/unit-testing) |
-
-**Reading docs without fighting the skeleton**
-
-1. Learn the API from docs (`request()`, `json()`, `route` patterns, middleware `before`, ActiveRecord methods, SimplePdo helpers).
-2. Place new code in this tree (`Controller`, `Middleware`, `Model`, `views`, `routes.php`, `services.php`).
-3. Prefer constructor injection over new static `Flight::` calls inside app classes.
-4. If a doc example uses `Flight::db()` or `Flight::render()`, the equivalent here is usually injected `SimplePdo` / `$this->app->render()` (render is already mapped to Twig).
-
-**Where docs and skeleton already agree**
-
-Flight’s own [unit testing guide](https://docs.flightphp.com/en/v3/guides/unit-testing) steers away from `Flight::` globals toward `Engine` injection and DI — the same stance this skeleton takes for `app/` code. Short facade examples in learn pages remain valid for quick experiments; they are not the house style for this starter.
-
-**Docs site updates**
-
-Install / structure pages on docs.flightphp.com should stay in sync with this README (especially `App\` namespaces and Twig/SimplePdo defaults) whenever the skeleton ships a breaking layout change. Until then, **this README is the source of truth for create-project layout**.
-
----
-
-## AI-assisted development (optional)
-
-Nothing in the runtime requires an AI tool. There is **no create-project question** about which assistant you use.
-
-This repo standardizes on the open **`AGENTS.md`** convention only (no separate Copilot / Cursor / Gemini / Windsurf rule files):
-
-| File | Role |
-|------|------|
-| **[AGENTS.md](AGENTS.md)** | Root rules + **routing table** to scoped files |
-| **`app/**/AGENTS.md`**, **`migrations/AGENTS.md`**, **`tests/AGENTS.md`** | Light, area-specific tips (controllers, Twig, Runway, …) loaded when working in that tree |
-| **[SECURITY.md](SECURITY.md)** | Secrets, headers, XSS/SQL, reporting — keep security deliberate and separate |
-
-If you use an AI assistant:
-
-1. Point it at root **`AGENTS.md`** (and let it follow links to scoped files when editing those folders).
-2. Prefer [docs.flightphp.com](https://docs.flightphp.com) and MCP `https://mcp.flightphp.com/mcp`.
-3. Verify APIs under `vendor/flightphp/core` — do not invent Flight methods.
-4. **Project AGENTS / SECURITY win** over generic training data.
-5. After application-code changes: add/update unit tests and run **`composer check`** (PHPUnit + PHPStan level 8).
-
-Hand-written and AI-generated code should look the same: one controller style, one config path, one view layer.
-
----
-
-## First customization checklist
-
-1. Add a route in `app/config/routes.php`
-2. Add `app/Controller/YourController.php` (constructor injection)
-3. Add a Twig template under `app/views/` **or** return JSON from the controller
-4. For DB: SQL file in `migrations/` (`.sql` for SQLite, `.mysql.sql` for MySQL), `php runway migrate`, model in `app/Model/`, inject `SimplePdo`
-5. After code changes: add/update tests, then run `composer check` (PHPUnit + PHPStan level 8)
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
----
-
-## Licence extraction agent
-
-Reads vendor licence documents (`.docx` / `.pdf`, including scans) with the Gemini API and appends
-one row per licence to `Master_Licences.xlsx` (sheet `VendorLicences`).
-
-1. Get a free API key from https://aistudio.google.com and set `GEMINI_API_KEY` in `.env`.
-   The default model is `gemini-3.8-flash` with `thinking_level` `low` (config `gemini.*`); override with `GEMINI_MODEL`.
-2. Drop documents into `storage/licences/incoming/` (or point `LICENCE_INCOMING_DIR`,
-   `LICENCE_PROCESSED_DIR`, `LICENCE_MASTER_XLSX` at a synced OneDrive folder).
-3. Run `php runway licences:process`, or use the web dashboard.
-
-**Web dashboard** — `composer start`, then open http://localhost:8000/ to upload documents
-(drag & drop), process the queue, filter the records and download the workbook. Forms are protected
-by `App\Middleware\CsrfMiddleware`; uploads are checked for extension, size (`licences.max_upload_mb`)
-and file signature, and stored outside `public/`. The dashboard has **no login** — do not expose it
-publicly without adding authentication.
-
-Gemini only reads the facts; `App\Service\LicenceNormalizer` applies the formatting rules
-(expiry = effective date + 1 year − 1 day, `WD,WL excluding …`, sorted upper-case districts,
-`NO.` instead of `№`, one address per line ending with a period). Rows are deduplicated on
-`VLFileNumber + VLNumber`. Processed files move to `processed/`; failed files stay in
-`incoming/` for the next run and are logged to `app/log/licence_agent.log`.
-
-Run it daily, silently:
+## Development
 
 ```bash
-# macOS / Linux (crontab -e): every day at 06:00
-0 6 * * * cd /path/to/data-extraction && php runway licences:process >/dev/null 2>&1
+composer check        # tests + static analysis; run after any PHP / Twig change
+npm install           # once, for UI work
+npm run build         # copy fonts + build public/assets/app.css
+npm run dev:css       # rebuild the CSS on save
 ```
 
-On Windows, create a Task Scheduler task that runs `php.exe runway licences:process` with
-"Start in" set to the project folder and "Run whether user is logged on or not" checked.
+`public/assets/app.css` and the fonts are committed, so servers do not need Node.
 
-### Frontend (Tailwind CSS)
+## Security
 
-The UI is Twig + Tailwind CSS v4. Source: `resources/css/app.css`; output: `public/assets/app.css`
-(committed, so servers without Node can run the app). After changing classes in `app/views/` or
-`public/assets/js/`, rebuild:
-
-```bash
-npm install          # once
-npm run build:css    # minified build
-npm run dev:css      # or rebuild on save while developing
-```
+- The dashboard has **no login**. Run it on a trusted network or put authentication in front of it
+  before exposing it to the internet.
+- All forms are CSRF-protected. Uploads are checked for extension, size and file signature, and
+  stored outside the web root.
+- Keep `GEMINI_API_KEY` in `.env` only; `.env`, `config.php`, the workbook, documents and logs are
+  git-ignored. Set `APP_DEBUG=false` in production.
