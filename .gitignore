@@ -22,3 +22,4 @@
 /storage/licences/incoming/*
 /storage/licences/processed/*
 !/storage/licences/*/.gitkeep
+/node_modules/

@@ -1,0 +1,17 @@
+{
+  "name": "data-extraction",
+  "private": true,
+  "description": "Frontend assets (Tailwind CSS) for the licence extraction dashboard",
+  "scripts": {
+    "build": "npm run build:fonts && npm run build:css",
+    "build:fonts": "mkdir -p public/assets/fonts && cp node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2 node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2 node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2 node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2 node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2 public/assets/fonts/",
+    "build:css": "tailwindcss -i ./resources/css/app.css -o ./public/assets/app.css --minify",
+    "dev:css": "tailwindcss -i ./resources/css/app.css -o ./public/assets/app.css --watch"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
+}
