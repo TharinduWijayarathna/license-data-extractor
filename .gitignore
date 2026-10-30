@@ -14,3 +14,11 @@
 /phpunit.xml
 /coverage/
 /clover.xml
+
+# Licence agent working files
+/storage/licences/*
+!/storage/licences/incoming/
+!/storage/licences/processed/
+/storage/licences/incoming/*
+/storage/licences/processed/*
+!/storage/licences/*/.gitkeep

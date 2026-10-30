@@ -23,13 +23,17 @@
     ],
     "require": {
         "php": "^8.4",
+        "ext-curl": "*",
+        "ext-dom": "*",
         "ext-json": "*",
         "ext-pdo": "*",
+        "ext-zip": "*",
         "flightphp/active-record": "^0.7.3",
         "flightphp/core": "^3.19.5",
         "flightphp/runway": "^1.2.6",
         "flightphp/session": "^0.3",
         "level-2/dice": "^4.0.4",
+        "phpoffice/phpspreadsheet": "^5.10",
         "tracy/tracy": "^2.12.2",
         "twig/twig": "^3.30"
     },

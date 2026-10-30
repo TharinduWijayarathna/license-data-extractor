@@ -33,6 +33,12 @@ final class Config
         'DB_USERNAME' => 'database.user',
         'DB_PASSWORD' => 'database.password',
         'DB_SQLITE_PATH' => 'database.file_path',
+        'GEMINI_API_KEY' => 'gemini.api_key',
+        'GEMINI_MODEL' => 'gemini.model',
+        'LICENCE_INCOMING_DIR' => 'licences.incoming_dir',
+        'LICENCE_PROCESSED_DIR' => 'licences.processed_dir',
+        'LICENCE_MASTER_XLSX' => 'licences.master_xlsx',
+        'LICENCE_LOG_FILE' => 'licences.log_file',
     ];
 
     /**

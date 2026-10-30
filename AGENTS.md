@@ -76,6 +76,7 @@ public/index.php
 | Models | `App\Model\…` → `app/Model/` |
 | Utils classes | `App\Utils\…` → `app/Utils/` |
 | CLI commands | `App\Command\…` → `app/commands/` (Runway scans this path) |
+| Services (licence agent) | `App\Service\…` → `app/Service/` |
 | Views | `app/views/*.twig` (not PHP classes) |
 | Framework | `flight\…` (unchanged) |
 
