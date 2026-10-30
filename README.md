@@ -262,3 +262,50 @@ Hand-written and AI-generated code should look the same: one controller style, o
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## Licence extraction agent
+
+Reads vendor licence documents (`.docx` / `.pdf`, including scans) with the Gemini API and appends
+one row per licence to `Master_Licences.xlsx` (sheet `VendorLicences`).
+
+1. Get a free API key from https://aistudio.google.com and set `GEMINI_API_KEY` in `.env`.
+   The default model is `gemini-3.8-flash` with `thinking_level` `low` (config `gemini.*`); override with `GEMINI_MODEL`.
+2. Drop documents into `storage/licences/incoming/` (or point `LICENCE_INCOMING_DIR`,
+   `LICENCE_PROCESSED_DIR`, `LICENCE_MASTER_XLSX` at a synced OneDrive folder).
+3. Run `php runway licences:process`, or use the web dashboard.
+
+**Web dashboard** — `composer start`, then open http://localhost:8000/ to upload documents
+(drag & drop), process the queue, filter the records and download the workbook. Forms are protected
+by `App\Middleware\CsrfMiddleware`; uploads are checked for extension, size (`licences.max_upload_mb`)
+and file signature, and stored outside `public/`. The dashboard has **no login** — do not expose it
+publicly without adding authentication.
+
+Gemini only reads the facts; `App\Service\LicenceNormalizer` applies the formatting rules
+(expiry = effective date + 1 year − 1 day, `WD,WL excluding …`, sorted upper-case districts,
+`NO.` instead of `№`, one address per line ending with a period). Rows are deduplicated on
+`VLFileNumber + VLNumber`. Processed files move to `processed/`; failed files stay in
+`incoming/` for the next run and are logged to `app/log/licence_agent.log`.
+
+Run it daily, silently:
+
+```bash
+# macOS / Linux (crontab -e): every day at 06:00
+0 6 * * * cd /path/to/data-extraction && php runway licences:process >/dev/null 2>&1
+```
+
+On Windows, create a Task Scheduler task that runs `php.exe runway licences:process` with
+"Start in" set to the project folder and "Run whether user is logged on or not" checked.
+
+### Frontend (Tailwind CSS)
+
+The UI is Twig + Tailwind CSS v4. Source: `resources/css/app.css`; output: `public/assets/app.css`
+(committed, so servers without Node can run the app). After changing classes in `app/views/` or
+`public/assets/js/`, rebuild:
+
+```bash
+npm install          # once
+npm run build:css    # minified build
+npm run dev:css      # or rebuild on save while developing
+```
