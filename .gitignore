@@ -1,0 +1,16 @@
+/vendor/
+/composer.lock
+/.vscode/
+/.vagrant/
+/.runway-creds.json
+/app/config/config.php
+/.env
+/database.sqlite
+/app/cache/*
+!/app/cache/.gitkeep
+/app/log/*
+!/app/log/.gitkeep
+/.phpunit.result.cache
+/phpunit.xml
+/coverage/
+/clover.xml
