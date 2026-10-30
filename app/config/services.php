@@ -15,6 +15,7 @@
  */
 
 use App\Utils\Config;
+use App\Utils\Csrf;
 use App\Utils\DatabaseFactory;
 use Dice\Dice;
 use flight\database\SimplePdo;
@@ -24,6 +25,7 @@ use flight\Session;
 use Tracy\Debugger;
 use Twig\Environment;
 use Twig\Loader\FilesystemLoader;
+use Twig\TwigFunction;
 
 // Runway loads config.php then services.php for config:get/set. No Engine yet.
 if (!isset($app) || !($app instanceof Engine) || !($config instanceof Config)) {
@@ -108,6 +110,11 @@ if (PHP_SAPI === 'cli') {
     $sessionOptions['start_session'] = false;
 }
 $session = new Session($sessionOptions);
+
+// {{ csrf_token() }} for state-changing forms (verified by CsrfMiddleware)
+$twig->addFunction(new TwigFunction('csrf_token', function () use ($session): string {
+    return Csrf::token($session);
+}));
 
 // ---------------------------------------------------------------------------
 // Dice + Engine substitutions (required — see Flight DI docs)

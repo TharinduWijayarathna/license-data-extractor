@@ -1,0 +1,215 @@
+{% extends 'layout.twig' %}
+
+{% block title %}Register — Licence Register{% endblock %}
+
+{% block header_actions %}
+    {% if exists %}
+        <a class="btn btn-quiet" href="{{ base_url }}download">
+            <span class="hidden sm:inline">Download workbook</span><span class="sm:hidden">Download</span>
+            <span class="font-mono text-[11px] text-muted">.xlsx</span>
+        </a>
+    {% endif %}
+{% endblock %}
+
+{% block body %}
+{# Thin progress line while an extraction request is running #}
+<div data-progress class="fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-accent-soft" hidden>
+    <div class="h-full w-2/5 animate-run-progress bg-accent"></div>
+</div>
+
+{% if flash %}
+    {% set ok = flash.type == 'ok' %}
+    <div role="status" data-dismissible class="mb-6 flex items-start gap-3 border-l-2 py-1 pl-4 {{ ok ? 'border-accent' : 'border-danger' }}">
+        <div class="flex-1 space-y-0.5 {{ ok ? 'text-ink' : 'text-danger' }}">
+            {% for message in flash.messages %}<p>{{ message }}</p>{% endfor %}
+        </div>
+        <button type="button" data-dismiss class="text-[12px] text-muted underline-offset-2 hover:text-ink hover:underline">Dismiss</button>
+    </div>
+{% endif %}
+
+<div class="mb-8 max-w-3xl">
+    <h1 class="text-[28px] leading-tight font-semibold tracking-tight">Vendor licence register</h1>
+    <p class="mt-2 text-[15px] leading-relaxed text-ink-2">
+        {% if rows is empty %}
+            No licences on file yet. Add documents to the inbox and run an extraction to start the workbook.
+        {% else %}
+            <span class="font-medium text-ink">{{ rows|length }} licence{{ rows|length == 1 ? '' : 's' }}</span> on file.
+            {% if expiring_count == 0 %}
+                None expire in the next {{ expiry_warning_days }} days.
+            {% else %}
+                <span class="font-medium text-warn">{{ expiring_count }} {{ expiring_count == 1 ? 'needs' : 'need' }} attention</span> — expired or expiring within {{ expiry_warning_days }} days.
+            {% endif %}
+            {% if updated_at %}Last updated {{ updated_at|date('j M Y, H:i') }}.{% endif %}
+        {% endif %}
+    </p>
+</div>
+
+<div class="grid grid-cols-[minmax(0,1fr)] items-start gap-8 lg:grid-cols-[300px_minmax(0,1fr)]">
+
+    {# ---------------- Inbox + activity ---------------- #}
+    <aside class="space-y-6 lg:sticky lg:top-6">
+        <section class="panel">
+            <div class="flex items-baseline justify-between border-b border-line px-4 py-3">
+                <h2 class="eyebrow">Inbox</h2>
+                <span class="font-mono text-[11px] text-muted">{{ pending|length }} waiting</span>
+            </div>
+
+            <form method="post" action="{{ base_url }}upload" enctype="multipart/form-data" data-busy="Uploading…" data-progress-trigger class="p-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label data-dropzone data-max-bytes="{{ max_upload_mb * 1048576 }}"
+                       class="relative block cursor-pointer rounded-md border border-dashed border-line-strong bg-paper px-4 py-5 text-center transition-colors hover:border-ink-2 data-[drag]:border-accent data-[drag]:bg-accent-soft">
+                    <input type="file" name="documents[]" accept=".docx,.pdf" multiple required class="absolute inset-0 cursor-pointer opacity-0">
+                    <span class="block font-medium">Drop licence documents</span>
+                    <span class="mt-0.5 block text-[12px] text-muted">or <span class="text-ink underline decoration-line-strong underline-offset-2">browse</span> · .docx or .pdf · {{ max_upload_mb }} MB max</span>
+                </label>
+                <ul data-picked class="mt-3 space-y-1 empty:hidden"></ul>
+                <p data-form-error class="mt-3 text-[12px] text-danger" hidden></p>
+                {# Files upload as soon as they are chosen; the button is the no-JS fallback #}
+                <button data-js-hidden class="btn btn-quiet mt-3 w-full" type="submit">Add to inbox</button>
+            </form>
+
+            {% if pending is not empty %}
+                <ul class="max-h-60 overflow-y-auto border-t border-line">
+                    {% for file in pending %}
+                        <li class="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
+                            <span class="w-9 shrink-0 font-mono text-[10px] font-medium text-muted uppercase">{{ file.name|split('.')|last }}</span>
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate" title="{{ file.name }}">{{ file.name }}</span>
+                                <span class="block font-mono text-[11px] text-faint">{{ (file.size / 1024)|round }} KB · {{ file.modified|date('j M H:i') }}</span>
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+
+            <div class="border-t border-line p-4">
+                <form method="post" action="{{ base_url }}process" data-busy="Extracting…" data-progress-trigger>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn {{ pending is empty ? 'btn-quiet' : 'btn-primary' }} w-full" type="submit" {{ pending is empty or not has_api_key ? 'disabled' }}>
+                        {% if pending is empty %}Inbox is empty{% else %}Extract {{ pending|length }} document{{ pending|length == 1 ? '' : 's' }}{% endif %}
+                    </button>
+                </form>
+                {% if not has_api_key %}
+                    <p class="mt-3 text-[12px] text-danger">Set <code class="font-mono">GEMINI_API_KEY</code> in .env to enable extraction.</p>
+                {% else %}
+                    <p class="mt-3 font-mono text-[11px] leading-relaxed text-faint">{{ model }} · ~3 s per document<br>daily: php runway licences:process</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section>
+            <h2 class="eyebrow mb-3">Activity</h2>
+            {% if activity is empty %}
+                <p class="text-[13px] text-muted">Nothing yet.</p>
+            {% else %}
+                <ol class="space-y-3">
+                    {% for entry in activity|slice(0, 8) %}
+                        <li class="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-3">
+                            <time class="pt-px font-mono text-[11px] text-faint tabular-nums" {% if entry.time %}datetime="{{ entry.time|date('c') }}" title="{{ entry.time|date('j M Y, H:i:s') }}"{% endif %}>{{ entry.time ? entry.time|date('H:i') : '' }}</time>
+                            <div class="min-w-0">
+                                <p class="truncate text-[12px] text-ink" title="{{ entry.subject }}">{{ entry.subject }}</p>
+                                {% if entry.detail %}
+                                    <p class="text-[12px] {{ entry.level == 'error' ? 'text-danger' : (entry.level == 'warn' ? 'text-warn' : 'text-muted') }}">{{ entry.detail }}</p>
+                                {% endif %}
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ol>
+            {% endif %}
+        </section>
+    </aside>
+
+    {# ---------------- Register ---------------- #}
+    <section class="panel min-w-0">
+        <div class="flex flex-col gap-3 border-b border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-baseline gap-3">
+                <h2 class="eyebrow">Register</h2>
+                <span data-count class="font-mono text-[11px] text-muted">{{ rows|length }} record{{ rows|length == 1 ? '' : 's' }}</span>
+            </div>
+            {% if rows is not empty %}
+                <label class="flex items-center gap-2 rounded-md border border-line bg-paper px-2.5 focus-within:border-ink-2 sm:w-72">
+                    <input type="search" data-filter placeholder="Filter by name, number or district" aria-label="Filter records"
+                           class="h-8 w-full bg-transparent text-[13px] outline-none placeholder:text-faint">
+                    <kbd class="rounded border border-line-strong px-1 font-mono text-[10px] text-muted">/</kbd>
+                </label>
+            {% endif %}
+        </div>
+
+        {% if rows is empty %}
+            <div class="px-5 py-20 text-center">
+                <p class="font-medium">The register is empty</p>
+                <p class="mt-1 text-muted">Extracted licences will be listed here and written to the workbook.</p>
+            </div>
+        {% else %}
+            <div class="hidden overflow-x-auto md:block">
+                <table class="w-full border-collapse text-left">
+                    <thead>
+                        <tr class="border-b border-line text-[11px] font-medium tracking-[0.06em] text-muted uppercase">
+                            <th class="py-2.5 pr-4 pl-5 font-medium whitespace-nowrap">Licence</th>
+                            <th class="py-2.5 pr-4 font-medium">Licensee</th>
+                            <th class="py-2.5 pr-4 font-medium">Premises &amp; district</th>
+                            <th class="py-2.5 pr-4 font-medium">Type</th>
+                            <th class="py-2.5 pr-5 text-right font-medium whitespace-nowrap">Expires</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            {% set type_parts = row.LicenceType|split(' excluding ') %}
+                            <tr data-record class="border-b border-line align-top transition-colors last:border-b-0 hover:bg-paper">
+                                <td class="py-3.5 pr-4 pl-5 whitespace-nowrap">
+                                    <span class="block font-mono text-[13px] font-medium">{{ row.VLNumber }}</span>
+                                    <span class="mt-0.5 block font-mono text-[11px] text-muted">{{ row.VLFileNumber }}</span>
+                                </td>
+                                <td class="min-w-36 py-3.5 pr-4 font-medium">{{ row.CompanyName }}</td>
+                                <td class="min-w-52 py-3.5 pr-4">
+                                    <span class="block leading-relaxed whitespace-pre-line text-ink-2">{{ row.Address1 }}</span>
+                                    {% if row.District %}<span class="mt-1 block text-[12px] text-muted">{{ row.District|title }}</span>{% endif %}
+                                </td>
+                                <td class="py-3.5 pr-4 whitespace-nowrap">
+                                    <span class="font-mono text-[12px]">{{ type_parts[0]|split(',')|join(' · ') }}</span>
+                                    {% if type_parts[1] is defined %}
+                                        <span class="mt-0.5 block text-[12px] text-muted">excl. {{ type_parts[1]|split(',')|join(', ') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="py-3.5 pr-5 text-right whitespace-nowrap">
+                                    <span class="font-mono text-[13px] tabular-nums {{ row.status == 'expired' ? 'text-danger line-through decoration-danger/40' : '' }}">{{ row.ExpireDate ?: '—' }}</span>
+                                    {% if row.status == 'expired' %}
+                                        <span class="mt-1 block text-[11px] font-medium text-danger">Expired</span>
+                                    {% elseif row.status == 'soon' %}
+                                        <span class="mt-1 ml-auto block w-fit rounded-sm bg-warn-soft px-1.5 text-[11px] font-medium text-warn">Expires soon</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {# Phones: one stacked entry per licence #}
+            <ul class="divide-y divide-line md:hidden">
+                {% for row in rows %}
+                    {% set type_parts = row.LicenceType|split(' excluding ') %}
+                    <li data-record class="px-5 py-4">
+                        <div class="flex items-baseline justify-between gap-3">
+                            <span class="font-mono text-[13px] font-medium">{{ row.VLNumber }}</span>
+                            <span class="font-mono text-[12px] tabular-nums {{ row.status == 'expired' ? 'text-danger' : (row.status == 'soon' ? 'text-warn' : 'text-muted') }}">
+                                {{ row.status == 'expired' ? 'expired ' : (row.status == 'soon' ? 'expires ' : '') }}{{ row.ExpireDate ?: '—' }}
+                            </span>
+                        </div>
+                        <p class="mt-1 font-medium">{{ row.CompanyName }}</p>
+                        <p class="mt-1 text-[13px] leading-relaxed whitespace-pre-line text-ink-2">{{ row.Address1 }}</p>
+                        <p class="mt-2 font-mono text-[11px] text-muted">
+                            {{ row.VLFileNumber }} · {{ type_parts[0]|split(',')|join(' · ') }}{% if type_parts[1] is defined %} excl. {{ type_parts[1]|split(',')|join(', ') }}{% endif %} · {{ row.District|title }}
+                        </p>
+                    </li>
+                {% endfor %}
+            </ul>
+            <p data-no-match class="px-5 py-12 text-center text-muted" hidden>No licences match that filter.</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ base_url }}assets/js/app.js" nonce="{{ csp_nonce }}" defer></script>
+{% endblock %}

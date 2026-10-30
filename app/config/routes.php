@@ -8,14 +8,20 @@
  * @var \App\Utils\Config $config
  */
 
-use App\Controller\HomeController;
+use App\Controller\LicenceController;
 use App\Controller\PostController;
+use App\Middleware\CsrfMiddleware;
 use App\Middleware\SecurityHeadersMiddleware;
 use App\Utils\DatabaseFactory;
 use flight\net\Router;
 
 $router->group('', function (Router $router) use ($config) {
-    $router->get('/', [HomeController::class, 'index']);
+    $router->group('/', function (Router $router) {
+        $router->get('', [LicenceController::class, 'index']);
+        $router->post('/upload', [LicenceController::class, 'upload']);
+        $router->post('/process', [LicenceController::class, 'process']);
+        $router->get('/download', [LicenceController::class, 'download']);
+    }, [CsrfMiddleware::class]);
 
     // Posts demo requires SimplePdo (PostController). Skip when DB is disabled.
     if (DatabaseFactory::isEnabled($config)) {

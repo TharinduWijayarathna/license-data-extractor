@@ -52,6 +52,8 @@ return [
         'processed_dir' => __DIR__ . '/../../storage/licences/processed',
         'master_xlsx' => __DIR__ . '/../../storage/licences/Master_Licences.xlsx',
         'log_file' => __DIR__ . '/../log/licence_agent.log',
+        // Per-file limit for web uploads (PHP's upload_max_filesize must allow it too)
+        'max_upload_mb' => 20,
     ],
     'runway' => [
         'index_root' => 'public/index.php',

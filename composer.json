@@ -63,7 +63,7 @@
         }
     },
     "scripts": {
-        "start": "@php -S localhost:8000 -t public",
+        "start": "@php -d upload_max_filesize=20M -d post_max_size=100M -S localhost:8000 -t public",
         "test": "phpunit",
         "analyse": "phpstan analyse --memory-limit=512M",
         "phpstan": "@analyse",
