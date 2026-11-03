@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
-use App\Service\LicenceAgent;
 use App\Service\LicenceAgentFactory;
-use App\Service\LicenceInbox;
 use App\Service\LicenceNormalizer;
 use App\Service\LicenceQueue;
 use App\Service\LicenceRecord;
+use App\Service\LicenceRegister;
 use App\Service\MasterWorkbook;
 use App\Utils\Config;
 use flight\Engine;
@@ -38,28 +37,30 @@ class LicenceController
     /** @var Session */
     private $session;
 
+    /** @var LicenceRegister */
+    private $register;
+
     /**
      * @param Engine $app
      */
-    public function __construct(Engine $app, Config $config, Session $session)
+    public function __construct(Engine $app, Config $config, Session $session, LicenceRegister $register)
     {
         $this->app = $app;
         $this->config = $config;
         $this->session = $session;
+        $this->register = $register;
     }
 
     public function index(): void
     {
-        $path = $this->masterPath();
+        $path = $this->register->masterPath();
         $exists = is_file($path);
-        $inbox = $this->inbox();
 
         $flash = $this->session->get(self::FLASH_KEY);
         $this->session->delete(self::FLASH_KEY);
 
         $rows = $this->withExpiryStatus($exists ? MasterWorkbook::open($path)->rows() : []);
-        $queue = LicenceAgentFactory::queue($this->config);
-        $jobs = $queue !== null ? $queue->activeJobs() : [];
+        $queue = $this->register->queue();
 
         $this->app->render('licences/index', [
             'columns' => LicenceRecord::COLUMNS,
@@ -71,13 +72,13 @@ class LicenceController
             'model' => (string) $this->config->get('gemini.model', ''),
             'exists' => $exists,
             'updated_at' => $exists ? (int) filemtime($path) : null,
-            'pending' => $this->withJobs($inbox->pending(), $jobs),
+            'pending' => $this->register->documents(),
             'queue_enabled' => $queue !== null,
-            'processing' => LicenceAgent::isProcessingIn($this->incomingDir()),
+            'processing' => $this->register->isProcessing(),
             'max_attempts' => $queue !== null ? $queue->maxAttempts() : 0,
             'now' => time(),
-            'max_upload_mb' => intdiv($inbox->maxBytes(), 1048576),
-            'has_api_key' => LicenceAgentFactory::hasApiKey($this->config),
+            'max_upload_mb' => intdiv($this->register->inbox()->maxBytes(), 1048576),
+            'has_api_key' => $this->register->hasGeminiKey(),
             'activity' => $this->recentLog(),
             'flash' => is_array($flash) ? $flash : null,
         ]);
@@ -85,7 +86,7 @@ class LicenceController
 
     public function upload(): void
     {
-        $inbox = $this->inbox();
+        $inbox = $this->register->inbox();
         $stored = [];
         $errors = [];
 
@@ -108,8 +109,8 @@ class LicenceController
 
         $messages = [];
         if ($stored !== []) {
-            $queue = LicenceAgentFactory::queue($this->config);
-            if ($queue !== null && LicenceAgentFactory::hasApiKey($this->config)) {
+            $queue = $this->register->queue();
+            if ($queue !== null && $this->register->hasGeminiKey()) {
                 $queue->sync($stored);
                 $messages[] = count($stored) . ' document(s) queued. ' . $this->dispatch();
             } else {
@@ -121,15 +122,14 @@ class LicenceController
 
     public function process(): void
     {
-        if (!LicenceAgentFactory::hasApiKey($this->config)) {
+        if (!$this->register->hasGeminiKey()) {
             $this->redirectWithFlash('error', ['GEMINI_API_KEY is not set. Add it to .env and reload.']);
             return;
         }
 
         // Queue mode: hand the inbox to the background processor and return at once
-        $queue = LicenceAgentFactory::queue($this->config);
-        if ($queue !== null) {
-            $queued = $queue->sync(array_column($this->inbox()->pending(), 'name'));
+        if ($this->register->queue() !== null) {
+            $queued = $this->register->queueWaiting();
             $this->redirectWithFlash('ok', [
                 ($queued > 0 ? "{$queued} document(s) queued. " : '') . $this->dispatch(),
             ]);
@@ -173,7 +173,7 @@ class LicenceController
 
     public function retry(string $id): void
     {
-        $queue = LicenceAgentFactory::queue($this->config);
+        $queue = $this->register->queue();
         if ($queue === null || !$queue->retry((int) $id)) {
             $this->redirectWithFlash('error', ['That job could not be retried — it may already be running.']);
             return;
@@ -187,9 +187,9 @@ class LicenceController
      */
     public function status(): void
     {
-        $queue = LicenceAgentFactory::queue($this->config);
+        $queue = $this->register->queue();
         $jobs = $queue !== null ? $queue->activeJobs() : [];
-        $master = $this->masterPath();
+        $master = $this->register->masterPath();
 
         $inFlight = count(array_filter($jobs, function (array $job): bool {
             return $job['status'] !== LicenceQueue::FAILED;
@@ -197,7 +197,7 @@ class LicenceController
 
         $this->app->json([
             'in_flight' => $inFlight,
-            'processing' => LicenceAgent::isProcessingIn($this->incomingDir()),
+            'processing' => $this->register->isProcessing(),
             // Changes whenever a job moves on or the workbook is written
             'version' => md5((string) json_encode([$jobs, is_file($master) ? filemtime($master) : 0])),
         ]);
@@ -205,7 +205,7 @@ class LicenceController
 
     public function download(): void
     {
-        $path = $this->masterPath();
+        $path = $this->register->masterPath();
         if (!is_file($path)) {
             $this->app->halt(404, 'The master workbook has not been created yet.');
             return;
@@ -231,39 +231,16 @@ class LicenceController
      */
     private function dispatch(): string
     {
-        if (LicenceAgent::isProcessingIn($this->incomingDir())) {
-            return 'The worker will pick them up shortly.';
+        switch ($this->register->startProcessor()) {
+            case LicenceRegister::RUN_ALREADY_RUNNING:
+                return 'The worker will pick them up shortly.';
+            case LicenceRegister::RUN_DEFERRED:
+                return 'They will be processed by the worker or the next scheduled run.';
+            case LicenceRegister::RUN_STARTED:
+                return 'Extracting in the background — this page updates automatically.';
+            default:
+                return 'Could not start a background run; start `php runway licences:work` or wait for the schedule.';
         }
-        if ((string) $this->config->get('licences.queue.dispatch', 'background') !== 'background') {
-            return 'They will be processed by the worker or the next scheduled run.';
-        }
-
-        return LicenceAgentFactory::dispatcher($this->config)->dispatch()
-            ? 'Extracting in the background — this page updates automatically.'
-            : 'Could not start a background run; start `php runway licences:work` or wait for the schedule.';
-    }
-
-    /**
-     * Attach each inbox document's current job (if any).
-     *
-     * @param array<int,array{name:string,size:int,modified:int}> $pending
-     * @param array<string,array{id:int,status:string,attempts:int,available_at:int,error:?string}> $jobs
-     * @return array<int,array<string,mixed>>
-     */
-    private function withJobs(array $pending, array $jobs): array
-    {
-        $out = [];
-        foreach ($pending as $file) {
-            $file['job'] = $jobs[$file['name']] ?? null;
-            $out[] = $file;
-        }
-
-        return $out;
-    }
-
-    private function incomingDir(): string
-    {
-        return (string) $this->config->get('licences.incoming_dir', '');
     }
 
     /**
@@ -328,7 +305,7 @@ class LicenceController
                 $level = strtolower($level);
             }
 
-            // File names cannot contain ":" on Windows/OneDrive, so the first ": " is the separator
+            // Stored file names never contain ":" (see LicenceInbox::safeName), so the first ": " is the separator
             $parts = explode(': ', $message, 2);
             $entries[] = [
                 'time' => $time,
@@ -339,18 +316,5 @@ class LicenceController
         }
 
         return $entries;
-    }
-
-    private function inbox(): LicenceInbox
-    {
-        return new LicenceInbox(
-            (string) $this->config->get('licences.incoming_dir', ''),
-            (int) $this->config->get('licences.max_upload_mb', 20) * 1048576
-        );
-    }
-
-    private function masterPath(): string
-    {
-        return (string) $this->config->get('licences.master_xlsx', '');
     }
 }

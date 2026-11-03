@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use App\Controller\LicenceController;
+use App\Service\LicenceRegister;
 use App\Utils\Config;
 use flight\Engine;
 use flight\Session;
@@ -47,7 +48,7 @@ class LicenceControllerTest extends TestCase
         $calls = [];
         $app = $this->engine($calls);
 
-        (new LicenceController($app, $this->config(), $session))->index();
+        (new LicenceController($app, $this->config(), $session, new LicenceRegister($this->config())))->index();
 
         $this->assertCount(1, $calls['render'] ?? []);
         [$template, $data] = $calls['render'][0];
@@ -74,7 +75,7 @@ class LicenceControllerTest extends TestCase
         $calls = [];
         $app = $this->engine($calls);
 
-        (new LicenceController($app, $this->config(), $session))->process();
+        (new LicenceController($app, $this->config(), $session, new LicenceRegister($this->config())))->process();
 
         $this->assertSame([['/']], $calls['redirect'] ?? []);
 
@@ -92,7 +93,7 @@ class LicenceControllerTest extends TestCase
         $session = $this->session();
 
         $calls = [];
-        (new LicenceController($this->engine($calls), $config, $session))->process();
+        (new LicenceController($this->engine($calls), $config, $session, new LicenceRegister($config)))->process();
 
         $flash = $session->get('licences_flash');
         $this->assertIsArray($flash);
@@ -101,12 +102,12 @@ class LicenceControllerTest extends TestCase
         $this->assertSame([['/']], $calls['redirect']);
 
         $calls = [];
-        (new LicenceController($this->engine($calls), $config, $session))->status();
+        (new LicenceController($this->engine($calls), $config, $session, new LicenceRegister($config)))->status();
         $this->assertSame(2, $calls['json'][0][0]['in_flight']);
         $this->assertFalse($calls['json'][0][0]['processing']);
 
         $calls = [];
-        (new LicenceController($this->engine($calls), $config, $session))->index();
+        (new LicenceController($this->engine($calls), $config, $session, new LicenceRegister($config)))->index();
         $data = $calls['render'][0][1];
         $this->assertTrue($data['queue_enabled']);
         $this->assertSame('queued', $data['pending'][0]['job']['status']);
@@ -118,7 +119,7 @@ class LicenceControllerTest extends TestCase
         $session = $this->session();
 
         $calls = [];
-        (new LicenceController($this->engine($calls), $config, $session))->retry('999');
+        (new LicenceController($this->engine($calls), $config, $session, new LicenceRegister($config)))->retry('999');
 
         $flash = $session->get('licences_flash');
         $this->assertIsArray($flash);
