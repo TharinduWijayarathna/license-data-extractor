@@ -106,7 +106,32 @@ final class LicenceInbox
     }
 
     /**
-     * Strip any path and characters that are unsafe on Windows/OneDrive.
+     * Validate raw file contents (e.g. a base64 upload decoded by the API) and
+     * store them in the incoming folder, with the same checks as a form upload.
+     *
+     * @return string The stored file name
+     * @throws RuntimeException With a message safe to show the user
+     */
+    public function storeContents(string $clientName, string $contents): string
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'licence_');
+        if ($tmp === false || file_put_contents($tmp, $contents) === false) {
+            throw new RuntimeException(self::safeName($clientName) . ': could not be saved.');
+        }
+        // tempnam() creates the file 0600; give it the permissions a normal upload would have
+        @chmod($tmp, 0666 & ~umask());
+
+        try {
+            return $this->store($clientName, $tmp, UPLOAD_ERR_OK, strlen($contents), false);
+        } finally {
+            if (is_file($tmp)) {
+                @unlink($tmp);
+            }
+        }
+    }
+
+    /**
+     * Strip any path and characters that are unsafe in file names on Windows, macOS or Linux.
      */
     public static function safeName(string $clientName): string
     {

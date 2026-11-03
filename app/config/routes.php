@@ -8,14 +8,15 @@
  * @var \App\Utils\Config $config
  */
 
+use App\Controller\ApiController;
 use App\Controller\LicenceController;
-use App\Controller\PostController;
+use App\Middleware\ApiKeyMiddleware;
 use App\Middleware\CsrfMiddleware;
 use App\Middleware\SecurityHeadersMiddleware;
-use App\Utils\DatabaseFactory;
 use flight\net\Router;
 
-$router->group('', function (Router $router) use ($config) {
+$router->group('', function (Router $router) {
+    // Dashboard (HTML forms, CSRF-protected)
     $router->group('/', function (Router $router) {
         $router->get('', [LicenceController::class, 'index']);
         $router->post('/upload', [LicenceController::class, 'upload']);
@@ -25,14 +26,12 @@ $router->group('', function (Router $router) use ($config) {
         $router->get('/status', [LicenceController::class, 'status']);
     }, [CsrfMiddleware::class]);
 
-    // Posts demo requires SimplePdo (PostController). Skip when DB is disabled.
-    if (DatabaseFactory::isEnabled($config)) {
-        $router->get('/posts', [PostController::class, 'index']);
-        $router->get('/posts/@id:[0-9]+', [PostController::class, 'show']);
-
-        $router->group('/api', function (Router $router) {
-            $router->get('/posts', [PostController::class, 'apiIndex']);
-            $router->get('/posts/@id:[0-9]+', [PostController::class, 'apiShow']);
-        });
-    }
+    // REST API for automations (API key required) — see docs/API.md
+    $router->group('/api/v1', function (Router $router) {
+        $router->post('/documents', [ApiController::class, 'upload']);
+        $router->post('/process', [ApiController::class, 'process']);
+        $router->get('/status', [ApiController::class, 'status']);
+        $router->get('/workbook', [ApiController::class, 'download']);
+        $router->post('/reset', [ApiController::class, 'reset']);
+    }, [ApiKeyMiddleware::class]);
 }, [SecurityHeadersMiddleware::class]);

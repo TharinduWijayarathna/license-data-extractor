@@ -19,7 +19,7 @@ Driver comes from `database.driver` in config (overridable by `DB_DRIVER` in `.e
 4. **Idempotency:** command skips already-applied names; still write SQL that is safe to reason about (`CREATE TABLE IF NOT EXISTS` where appropriate).
 5. **Do not put MySQL SQL in plain `.sql` files** (or SQLite SQL in `*.mysql.sql`). Glob would match both; the command filters by suffix.
 6. **Multi-statement:** migrate splits on statement boundaries; keep statements clear; line `--` comments are stripped.
-7. **App models** must match tables after migrate (e.g. `posts` ↔ `App\Model\Post`).
+7. **App models** must match tables after migrate (e.g. `vendors` ↔ `App\Model\Vendor`).
 8. **Do not** put secrets or production data dumps in migrations committed to git.
 
 ## Workflow

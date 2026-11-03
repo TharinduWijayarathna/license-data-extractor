@@ -23,8 +23,10 @@ adds it twice.
   licences have expired or expire within 90 days, and download the workbook.
 - **Job queue**: every document is a job with automatic retries (back-off for Gemini rate limits),
   a live status in the dashboard, and a **Retry** button for documents that failed.
+- **REST API**: upload documents, start processing, poll the status and download the workbook from
+  another system such as Power Automate, protected by API keys. See **[docs/API.md](docs/API.md)**.
 - **Unattended mode**: a daily scheduled run or an always-on worker processes anything placed in the
-  incoming folder, including a synced OneDrive / network folder.
+  incoming folder.
 - **Accurate by design**: Gemini only reads facts off the page, using a strict JSON schema; all
   formatting rules are applied in PHP (`App\Service\LicenceNormalizer`), so output is consistent.
 
@@ -52,12 +54,12 @@ Upload a document on the dashboard, and the row appears in the register a few se
 ## How processing works
 
 ```
-upload / folder ──► incoming/ ──► job queue ──► processor ──► Gemini ──► rules ──► Master_Licences.xlsx
+upload / API / folder ──► incoming/ ──► job queue ──► processor ──► Gemini ──► rules ──► Master_Licences.xlsx
                                   (database)    (one at a time)                     document → processed/
 ```
 
-1. **Documents arrive** in `storage/licences/incoming/`, either uploaded on the dashboard or copied
-   into the folder directly (e.g. by OneDrive sync).
+1. **Documents arrive** in `storage/licences/incoming/`: uploaded on the dashboard, sent to the
+   API, or copied into the folder directly.
 2. **Each document becomes a job** in the `licence_jobs` table: *queued → processing → done*.
 3. **A processor works through the queue**, one document at a time (about 3 seconds each). Only one
    processor runs at once; a lock file guarantees it, so the scheduler, the worker and the dashboard
@@ -74,6 +76,7 @@ upload / folder ──► incoming/ ──► job queue ──► processor ─�
 | Trigger | When to use |
 |---|---|
 | Dashboard upload or **Extract** | Starts a background run automatically, and the page updates itself as jobs finish. |
+| `POST /api/v1/process` | Same as **Extract**, for automations (API uploads wait for this call). |
 | `php runway licences:process` | Processes everything queued (waiting for short retries), then exits. Ideal for a daily schedule. |
 | `php runway licences:work` | Stays running and picks documents up within seconds. Use on a server under a process manager. |
 
@@ -113,18 +116,21 @@ to have it exit hourly so the process manager restarts it fresh. On Windows, run
 a service with [NSSM](https://nssm.cc). With a worker running you can set
 `LICENCE_QUEUE_DISPATCH=none`, so uploads just queue and leave the work to it.
 
-### OneDrive or a shared folder
+## REST API
 
-Point the folders at a synced location in `.env`:
+For automations (Power Automate, scripts, other systems). Every request needs an API key in the
+`X-API-Key` header; the API is disabled until `API_KEYS` is set in `.env`.
 
-```dotenv
-LICENCE_INCOMING_DIR="C:\Users\me\OneDrive\Licensing\Incoming"
-LICENCE_PROCESSED_DIR="C:\Users\me\OneDrive\Licensing\Processed"
-LICENCE_MASTER_XLSX="C:\Users\me\OneDrive\Licensing\Master_Licences.xlsx"
-```
+| Endpoint | What it does |
+|---|---|
+| `POST /api/v1/documents` | Upload one or many `.pdf` / `.docx` files (multipart or JSON base64) |
+| `POST /api/v1/process` | Start processing everything uploaded; returns at once (202) |
+| `GET /api/v1/status` | Per-document state and `ready: true` once the workbook can be downloaded |
+| `GET /api/v1/workbook` | The `.xlsx`, or `409` with an explanation while documents are still processing |
+| `POST /api/v1/reset` | Delete all documents, the workbook, the queue and the log (body `{"confirm": "RESET"}`) |
 
-Files dropped into the folder are queued on the next run (or within seconds when the worker runs).
-Close the workbook in Excel before a run; Windows cannot replace a file that is open.
+**[docs/API.md](docs/API.md)** explains every endpoint, error and a complete Power Automate flow,
+written for people who have never used an API.
 
 ## Configuration
 
@@ -133,6 +139,7 @@ Set these in `.env`; defaults live in `app/config/config.php` (`gemini.*`, `lice
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | (none) | **Required** to extract documents |
+| `API_KEYS` | (none) | Comma-separated keys for the REST API; empty disables it. Generate: `php -r "echo bin2hex(random_bytes(32));"` |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Pinned model; `thinking_level` is `low` (fast and accurate for extraction) |
 | `LICENCE_INCOMING_DIR` | `storage/licences/incoming` | Documents waiting to be processed |
 | `LICENCE_PROCESSED_DIR` | `storage/licences/processed` | Documents already processed |
@@ -165,7 +172,8 @@ app/
   commands/      licences:process, licences:work (Runway CLI)
   config/        config, routes, services
   Controller/    LicenceController: dashboard, upload, extract, retry, status feed
-  Middleware/    CSRF protection, security headers
+                 ApiController: REST API (/api/v1)
+  Middleware/    CSRF protection, API key check, security headers
   Service/       the pipeline:
                    GeminiLicenceExtractor  document → raw facts (Gemini, JSON schema)
                    DocxTextExtractor       .docx → text (Gemini cannot read Word files)
@@ -176,7 +184,9 @@ app/
                    LicenceWorker           runs queued jobs through the agent
                    LicenceDispatcher       starts background runs from the web
                    LicenceInbox            validated uploads, incoming folder listing
+                   LicenceRegister         shared by dashboard + API: document states, starting runs
   views/         Twig templates
+docs/            API.md: REST API and Power Automate guide
 migrations/      SQL migrations (SQLite + MySQL pairs)
 public/          web root: index.php, built CSS, fonts, JS
 resources/css/   Tailwind source
@@ -202,7 +212,9 @@ npm run dev:css       # rebuild the CSS on save
 
 - The dashboard has **no login**. Run it on a trusted network or put authentication in front of it
   before exposing it to the internet.
+- The REST API requires a key from `API_KEYS` (compared in constant time) and is off when none is
+  set. Serve it over HTTPS only, and give each integration its own key so it can be revoked alone.
 - All forms are CSRF-protected. Uploads are checked for extension, size and file signature, and
   stored outside the web root.
-- Keep `GEMINI_API_KEY` in `.env` only; `.env`, `config.php`, the workbook, documents and logs are
+- Keep `GEMINI_API_KEY` and `API_KEYS` in `.env` only; `.env`, `config.php`, the workbook, documents and logs are
   git-ignored. Set `APP_DEBUG=false` in production.

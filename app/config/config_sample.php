@@ -47,7 +47,7 @@ return [
         'timeout' => 120,
     ],
     'licences' => [
-        // Point these at a synced OneDrive / network folder in .env if needed.
+        // Storage locations; override in .env (LICENCE_*) when deploying.
         'incoming_dir' => __DIR__ . '/../../storage/licences/incoming',
         'processed_dir' => __DIR__ . '/../../storage/licences/processed',
         'master_xlsx' => __DIR__ . '/../../storage/licences/Master_Licences.xlsx',
@@ -67,6 +67,11 @@ return [
             // A job "processing" longer than this is assumed abandoned and re-queued
             'stale_after' => 900,
         ],
+    ],
+    'api' => [
+        // Secret: set API_KEYS in .env (comma-separated, one per integration).
+        // Empty = the /api/v1 endpoints are disabled.
+        'keys' => '',
     ],
     'runway' => [
         'index_root' => 'public/index.php',

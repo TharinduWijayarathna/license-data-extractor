@@ -41,6 +41,7 @@ final class Config
         'LICENCE_LOG_FILE' => 'licences.log_file',
         'LICENCE_QUEUE_DISPATCH' => 'licences.queue.dispatch',
         'LICENCE_PHP_BINARY' => 'licences.queue.php_binary',
+        'API_KEYS' => 'api.keys',
     ];
 
     /**
@@ -103,7 +104,7 @@ final class Config
 
     /**
      * Application base URL with a trailing slash so templates can
-     * safely join paths: {{ base_url }}posts → /myapp/posts
+     * safely join paths: {{ base_url }}download → /myapp/download
      */
     public function baseUrl(): string
     {

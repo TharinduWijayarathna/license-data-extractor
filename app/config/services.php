@@ -82,7 +82,7 @@ $twig = new Environment($loader, [
 
 $twig->addGlobal('csp_nonce', $nonce);
 $twig->addGlobal('app_env', $config->env());
-// Always trailing slash so {{ base_url }}posts joins correctly under subpaths
+// Always trailing slash so {{ base_url }}download joins correctly under subpaths
 $twig->addGlobal('base_url', $config->baseUrl());
 
 // Map Flight render → Twig (single documented view path)
