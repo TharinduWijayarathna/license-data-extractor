@@ -103,7 +103,7 @@ final class Config
 
     /**
      * Application base URL with a trailing slash so templates can
-     * safely join paths: {{ base_url }}posts → /myapp/posts
+     * safely join paths: {{ base_url }}download → /myapp/download
      */
     public function baseUrl(): string
     {

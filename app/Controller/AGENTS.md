@@ -15,7 +15,7 @@ HTTP action classes. One public method per route action (or a small coherent set
 5. **JSON:** `$this->app->json($payload, $status)` (optional pretty-print args per core docs). Prefer this over `echo json_encode`.
 6. **404 / early exit:** `$this->app->halt($code, $message)` or return after setting response. For APIs, JSON error body + status is fine.
 7. **Constructor injection only** for dependencies (`Config`, `SimplePdo`, `Session`, etc.). Register shared services in `app/config/services.php`.
-8. **Models:** inject `SimplePdo`, then `new Post($this->db)` (or inject a factory later). Do not invent a static `Model::find()` base class.
+8. **Models:** inject `SimplePdo`, then `new Vendor($this->db)` (or inject a factory later). Do not invent a static `Model::find()` base class.
 9. **No `$_ENV`.** Use injected `App\Utils\Config`.
 10. **Routes stay in `app/config/routes.php`.** Controllers do not register their own routes.
 
