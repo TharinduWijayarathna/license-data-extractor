@@ -47,7 +47,7 @@ return [
         'timeout' => 120,
     ],
     'licences' => [
-        // Point these at a synced OneDrive / network folder in .env if needed.
+        // Storage locations; override in .env (LICENCE_*) when deploying.
         'incoming_dir' => __DIR__ . '/../../storage/licences/incoming',
         'processed_dir' => __DIR__ . '/../../storage/licences/processed',
         'master_xlsx' => __DIR__ . '/../../storage/licences/Master_Licences.xlsx',

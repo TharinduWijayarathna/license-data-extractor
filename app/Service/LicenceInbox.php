@@ -106,7 +106,7 @@ final class LicenceInbox
     }
 
     /**
-     * Strip any path and characters that are unsafe on Windows/OneDrive.
+     * Strip any path and characters that are unsafe in file names on Windows, macOS or Linux.
      */
     public static function safeName(string $clientName): string
     {

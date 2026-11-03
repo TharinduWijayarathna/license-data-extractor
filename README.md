@@ -24,7 +24,7 @@ adds it twice.
 - **Job queue**: every document is a job with automatic retries (back-off for Gemini rate limits),
   a live status in the dashboard, and a **Retry** button for documents that failed.
 - **Unattended mode**: a daily scheduled run or an always-on worker processes anything placed in the
-  incoming folder, including a synced OneDrive / network folder.
+  incoming folder.
 - **Accurate by design**: Gemini only reads facts off the page, using a strict JSON schema; all
   formatting rules are applied in PHP (`App\Service\LicenceNormalizer`), so output is consistent.
 
@@ -57,7 +57,7 @@ upload / folder ──► incoming/ ──► job queue ──► processor ─�
 ```
 
 1. **Documents arrive** in `storage/licences/incoming/`, either uploaded on the dashboard or copied
-   into the folder directly (e.g. by OneDrive sync).
+   into the folder directly.
 2. **Each document becomes a job** in the `licence_jobs` table: *queued → processing → done*.
 3. **A processor works through the queue**, one document at a time (about 3 seconds each). Only one
    processor runs at once; a lock file guarantees it, so the scheduler, the worker and the dashboard
@@ -112,19 +112,6 @@ The worker stops cleanly on `SIGTERM` / Ctrl+C after the current document. Use `
 to have it exit hourly so the process manager restarts it fresh. On Windows, run the same command as
 a service with [NSSM](https://nssm.cc). With a worker running you can set
 `LICENCE_QUEUE_DISPATCH=none`, so uploads just queue and leave the work to it.
-
-### OneDrive or a shared folder
-
-Point the folders at a synced location in `.env`:
-
-```dotenv
-LICENCE_INCOMING_DIR="C:\Users\me\OneDrive\Licensing\Incoming"
-LICENCE_PROCESSED_DIR="C:\Users\me\OneDrive\Licensing\Processed"
-LICENCE_MASTER_XLSX="C:\Users\me\OneDrive\Licensing\Master_Licences.xlsx"
-```
-
-Files dropped into the folder are queued on the next run (or within seconds when the worker runs).
-Close the workbook in Excel before a run; Windows cannot replace a file that is open.
 
 ## Configuration
 

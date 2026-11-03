@@ -78,8 +78,8 @@ final class LicenceQueue
     }
 
     /**
-     * Queue every given document that has no active job yet (e.g. files dropped
-     * straight into a synced OneDrive folder).
+     * Queue every given document that has no active job yet (e.g. files copied
+     * straight into the incoming folder).
      *
      * @param array<int,string> $fileNames
      * @return int Number of new jobs
