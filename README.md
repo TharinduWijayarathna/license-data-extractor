@@ -127,6 +127,7 @@ For automations (Power Automate, scripts, other systems). Every request needs an
 | `POST /api/v1/process` | Start processing everything uploaded; returns at once (202) |
 | `GET /api/v1/status` | Per-document state and `ready: true` once the workbook can be downloaded |
 | `GET /api/v1/workbook` | The `.xlsx`, or `409` with an explanation while documents are still processing |
+| `POST /api/v1/reset` | Delete all documents, the workbook, the queue and the log (body `{"confirm": "RESET"}`) |
 
 **[docs/API.md](docs/API.md)** explains every endpoint, error and a complete Power Automate flow,
 written for people who have never used an API.

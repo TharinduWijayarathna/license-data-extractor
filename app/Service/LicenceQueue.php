@@ -258,6 +258,16 @@ final class LicenceQueue
         return $counts;
     }
 
+    /**
+     * Delete every job, whatever its state.
+     *
+     * @return int Jobs deleted
+     */
+    public function clear(): int
+    {
+        return $this->db->delete('licence_jobs', '1 = 1');
+    }
+
     public function maxAttempts(): int
     {
         return $this->maxAttempts;

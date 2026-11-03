@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Utils\Config;
+use RuntimeException;
 
 /**
  * Operations shared by the dashboard and the REST API: the inbox, the job
@@ -153,4 +154,66 @@ class LicenceRegister
         return LicenceAgentFactory::dispatcher($this->config)->dispatch() ? self::RUN_STARTED : self::RUN_FAILED;
     }
 
+    /**
+     * Start over: delete every job, waiting and processed document, the workbook
+     * and the activity log. Jobs go first so no worker picks up a document that
+     * is about to disappear. Callers must not reset while a document is processing.
+     *
+     * @return array{jobs:int,documents_waiting:int,documents_processed:int,workbook:bool,log:bool}
+     * @throws RuntimeException When a file cannot be deleted (e.g. open in Excel on Windows)
+     */
+    public function reset(): array
+    {
+        $queue = $this->queue();
+
+        return [
+            'jobs' => $queue !== null ? $queue->clear() : 0,
+            'documents_waiting' => $this->deleteDocuments($this->incomingDir()),
+            'documents_processed' => $this->deleteDocuments((string) $this->config->get('licences.processed_dir', '')),
+            'workbook' => $this->deleteFile($this->masterPath()),
+            'log' => $this->deleteFile((string) $this->config->get('licences.log_file', '')),
+        ];
+    }
+
+    /**
+     * Delete the .docx / .pdf documents (and Word "~$" lock files) in a folder.
+     * Dotfiles such as the processor lock are left alone.
+     */
+    private function deleteDocuments(string $dir): int
+    {
+        $dir = rtrim($dir, '/\\');
+        if ($dir === '' || !is_dir($dir)) {
+            return 0;
+        }
+
+        $deleted = 0;
+        foreach (scandir($dir) ?: [] as $entry) {
+            $path = $dir . DIRECTORY_SEPARATOR . $entry;
+            $isDocument = in_array(strtolower(pathinfo($entry, PATHINFO_EXTENSION)), LicenceAgent::EXTENSIONS, true);
+            if ($entry[0] === '.' || !is_file($path) || !$isDocument) {
+                continue;
+            }
+            $this->deleteFile($path);
+            if (strpos($entry, '~$') !== 0) {
+                $deleted++;
+            }
+        }
+
+        return $deleted;
+    }
+
+    /**
+     * @return bool Whether a file was there and has been deleted
+     */
+    private function deleteFile(string $path): bool
+    {
+        if ($path === '' || !is_file($path)) {
+            return false;
+        }
+        if (!@unlink($path)) {
+            throw new RuntimeException(basename($path) . ' could not be deleted. Is it open in another program?');
+        }
+
+        return true;
+    }
 }

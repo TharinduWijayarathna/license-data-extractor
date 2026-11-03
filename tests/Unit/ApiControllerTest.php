@@ -183,6 +183,69 @@ class ApiControllerTest extends TestCase
         $this->assertStringContainsString('worker or scheduled run', $process['body']['message']);
     }
 
+    public function testResetRequiresConfirmation(): void
+    {
+        touch($this->dir . '/incoming/a.pdf');
+
+        $response = $this->call('reset', $this->queueConfig(), ['confirm' => 'yes']);
+
+        $this->assertSame(400, $response['status']);
+        $this->assertSame('confirmation_required', $response['body']['error']);
+        $this->assertFileExists($this->dir . '/incoming/a.pdf');
+    }
+
+    public function testResetIsBlockedWhileADocumentIsProcessing(): void
+    {
+        $config = $this->queueConfig();
+        touch($this->dir . '/incoming/a.pdf');
+        $queue = (new LicenceRegister($config))->queue();
+        $this->assertInstanceOf(LicenceQueue::class, $queue);
+        $queue->enqueue('a.pdf');
+        $queue->reserve();
+
+        $response = $this->call('reset', $config, ['confirm' => 'RESET']);
+
+        $this->assertSame(409, $response['status']);
+        $this->assertSame('reset_blocked', $response['body']['error']);
+        $this->assertFileExists($this->dir . '/incoming/a.pdf');
+    }
+
+    public function testResetClearsEverything(): void
+    {
+        $config = $this->queueConfig();
+        mkdir($this->dir . '/processed');
+        touch($this->dir . '/incoming/a.pdf');
+        touch($this->dir . '/incoming/b.docx');
+        touch($this->dir . '/incoming/~$b.docx');
+        touch($this->dir . '/incoming/.agent.lock');
+        touch($this->dir . '/processed/old.pdf');
+        file_put_contents($this->dir . '/agent.log', "[2026-11-04 09:00:00] INFO old.pdf: 1 record(s) added\n");
+        MasterWorkbook::open($this->dir . '/Master.xlsx')->save();
+        $queue = (new LicenceRegister($config))->queue();
+        $this->assertInstanceOf(LicenceQueue::class, $queue);
+        $queue->enqueue('a.pdf');
+        $failed = $queue->enqueue('b.docx');
+        $this->assertNotNull($failed);
+        $queue->fail($failed, 3, 'boom', true);
+
+        $response = $this->call('reset', $config, ['confirm' => 'RESET']);
+
+        $this->assertSame(200, $response['status']);
+        $this->assertSame(
+            ['jobs' => 2, 'documents_waiting' => 2, 'documents_processed' => 1, 'workbook' => true, 'log' => true],
+            $response['body']['deleted']
+        );
+        $this->assertSame(['.agent.lock'], array_values(array_diff(scandir($this->dir . '/incoming') ?: [], ['.', '..'])));
+        $this->assertSame([], glob($this->dir . '/processed/*'));
+        $this->assertFileDoesNotExist($this->dir . '/Master.xlsx');
+        $this->assertFileDoesNotExist($this->dir . '/agent.log');
+        $this->assertSame(['queued' => 0, 'processing' => 0, 'failed' => 0, 'done' => 0], $queue->counts());
+
+        $status = $this->call('status', $config)['body'];
+        $this->assertSame('idle', $status['state']);
+        $this->assertFalse($status['workbook']['exists']);
+    }
+
     /**
      * Invoke one controller action against a fresh Engine.
      *

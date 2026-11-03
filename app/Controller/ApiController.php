@@ -217,6 +217,38 @@ class ApiController
     }
 
     /**
+     * POST /api/v1/reset: delete all documents, the workbook, the job queue and
+     * the activity log. Requires {"confirm": "RESET"} so it is never accidental.
+     */
+    public function reset(): void
+    {
+        if (($this->app->request()->data['confirm'] ?? null) !== 'RESET') {
+            $this->error(400, 'confirmation_required', 'Reset deletes all documents, the workbook, the job queue and the activity log. To confirm, send {"confirm": "RESET"}.');
+            return;
+        }
+
+        $processing = LicenceRegister::countStates($this->register->documents())[LicenceQueue::PROCESSING];
+        if ($processing > 0) {
+            $this->app->response()->header('Retry-After', (string) self::RETRY_AFTER);
+            $this->error(409, 'reset_blocked', "{$processing} document(s) are being processed right now. Try again in about " . self::RETRY_AFTER . ' seconds.');
+            return;
+        }
+
+        try {
+            $deleted = $this->register->reset();
+        } catch (\RuntimeException $e) {
+            $this->error(500, 'reset_failed', 'Reset did not finish: ' . $e->getMessage() . ' Fix that and call reset again.');
+            return;
+        }
+
+        $this->app->json([
+            'status' => 'reset',
+            'deleted' => $deleted,
+            'message' => 'Everything has been cleared. The register is empty and ready for new documents.',
+        ]);
+    }
+
+    /**
      * processing: something is queued or running; waiting_to_start: only
      * uploaded documents nobody asked to process; idle: nothing pending
      * (failed documents do not block, they need a manual retry).

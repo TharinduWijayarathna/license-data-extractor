@@ -32,5 +32,6 @@ $router->group('', function (Router $router) {
         $router->post('/process', [ApiController::class, 'process']);
         $router->get('/status', [ApiController::class, 'status']);
         $router->get('/workbook', [ApiController::class, 'download']);
+        $router->post('/reset', [ApiController::class, 'reset']);
     }, [ApiKeyMiddleware::class]);
 }, [SecurityHeadersMiddleware::class]);

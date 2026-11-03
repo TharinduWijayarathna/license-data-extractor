@@ -7,6 +7,7 @@ otherwise do by hand on the dashboard:
 2. **Start processing** them.
 3. **Check the status** until processing is finished.
 4. **Download** the finished Excel workbook (`Master_Licences.xlsx`).
+5. **Reset** (optional): wipe everything and start again from an empty register.
 
 ```
  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────┐   ┌────────────────┐
@@ -17,6 +18,8 @@ otherwise do by hand on the dashboard:
 ```
 
 The dashboard keeps working exactly as before; the API is an extra door into the same system.
+Anything you do through the API (including a reset) also shows on the dashboard, and the other way
+round.
 
 ---
 
@@ -28,6 +31,7 @@ The dashboard keeps working exactly as before; the API is an extra door into the
 - [Endpoint 2: start processing](#2-start-processing)
 - [Endpoint 3: check the status](#3-check-the-status)
 - [Endpoint 4: download the workbook](#4-download-the-workbook)
+- [Endpoint 5: reset everything](#5-reset-everything)
 - [Error codes](#error-codes)
 - [Power Automate: step by step](#power-automate-step-by-step)
 - [Try it from the command line](#try-it-from-the-command-line)
@@ -311,6 +315,66 @@ The workbook is the full register: every licence ever processed, not only today'
 
 ---
 
+## 5. Reset everything
+
+```
+POST /api/v1/reset
+```
+
+> ⚠️ **This permanently deletes data and cannot be undone.** Download the workbook first if you
+> want to keep it.
+
+Clears the whole app so it is like a fresh install:
+
+| Deleted | |
+|---|---|
+| Documents waiting to be processed | including failed ones |
+| Documents already processed | the archived originals |
+| The Excel workbook | `Master_Licences.xlsx`, so the register starts empty |
+| The job queue | every job, whatever its state |
+| The activity log | the **Activity** list on the dashboard |
+
+Settings, API keys and the Gemini key are **not** touched.
+
+To make sure nobody resets by accident, the request **must** contain this body
+(header `Content-Type: application/json`):
+
+```json
+{ "confirm": "RESET" }
+```
+
+`RESET` must be in capital letters exactly like that.
+
+### Answer
+
+**200 OK**
+
+```json
+{
+  "status": "reset",
+  "deleted": {
+    "jobs": 5,
+    "documents_waiting": 1,
+    "documents_processed": 4,
+    "workbook": true,
+    "log": true
+  },
+  "message": "Everything has been cleared. The register is empty and ready for new documents."
+}
+```
+
+`deleted` shows what was removed (`workbook` / `log` are `false` if there was none).
+
+| Status | `error` | Meaning | What to do |
+|---|---|---|---|
+| 400 | `confirmation_required` | The body did not contain `{"confirm": "RESET"}`. Nothing was deleted. | Add the body. |
+| 409 | `reset_blocked` | A document is being extracted right now. Nothing was deleted. A `Retry-After: 30` header is included. | Wait half a minute and try again. |
+| 500 | `reset_failed` | A file could not be deleted (on Windows, usually the workbook is open in Excel). Part of the data may already be gone. | Close the file and call reset again; it is safe to repeat. |
+
+Documents that are only *queued* (not yet being extracted) do not block a reset; they are deleted.
+
+---
+
 ## Error codes
 
 | HTTP | `error` | Where | What it means |
@@ -324,6 +388,9 @@ The workbook is the full register: every licence ever processed, not only today'
 | 409 | `processing_not_started` | workbook | Uploaded documents are waiting for `POST /process`. |
 | 409 | `still_processing` | workbook | Not finished yet; try again later. |
 | 404 | `workbook_not_found` | workbook | No workbook exists yet. |
+| 400 | `confirmation_required` | reset | Body `{"confirm": "RESET"}` missing; nothing deleted. |
+| 409 | `reset_blocked` | reset | A document is being processed; try again shortly. |
+| 500 | `reset_failed` | reset | A file could not be deleted (open in another program?). |
 
 ---
 
@@ -452,6 +519,21 @@ To warn someone about failed documents, add a **Condition** after the download:
 and send a notification in the *If yes* branch. Details of each failure are in the last
 **Check status** result (`documents[].error`) and on the dashboard.
 
+### Optional: reset before or after a run
+
+If every run should start from an empty register (so the workbook contains **only** this run's
+documents), add an **HTTP** action **before step 2**, renamed **Reset**:
+
+| Field | Value |
+|---|---|
+| Method | `POST` |
+| URI | `@{variables('BaseUrl')}/reset` |
+| Headers | `X-API-Key` → `@{variables('ApiKey')}` <br> `Content-Type` → `application/json` |
+| Body | `{ "confirm": "RESET" }` |
+
+Only do this if nobody else (another flow or someone on the dashboard) relies on the register,
+because a reset clears it for everyone.
+
 ### Common Power Automate problems
 
 | Symptom | Fix |
@@ -461,6 +543,7 @@ and send a notification in the *If yes* branch. Details of each failure are in t
 | 422 `invalid_files` | Only images / unsupported files were sent. Filter attachments (see step 2). |
 | Do until stops after an hour with `ready` still false | Something is stuck; open the dashboard and look at the **Activity** log. |
 | 409 `processing_not_started` | The **Start processing** step was skipped or failed. |
+| 400 `confirmation_required` on reset | Body must be exactly `{ "confirm": "RESET" }` and the `Content-Type: application/json` header must be set. |
 | Downloaded file will not open | Make sure you use the action's `Body` as file content, not a `string(...)` of it. |
 
 ---
@@ -489,7 +572,13 @@ curl -H "X-API-Key: $KEY" "$URL/status"
 
 # 4. Download the workbook
 curl -H "X-API-Key: $KEY" -o Master_Licences.xlsx "$URL/workbook"
+
+# 5. (Optional) wipe everything and start over. Cannot be undone!
+curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+     -d '{"confirm": "RESET"}' "$URL/reset"
 ```
+
+(PowerShell: `-d '{\"confirm\": \"RESET\"}'`.)
 
 ---
 
@@ -507,7 +596,13 @@ documents, and the download waits until *all* waiting documents are done.
 No. Rows are matched on *VLFileNumber + VLNumber*; a repeat is skipped.
 
 **Does the workbook only contain the documents I just sent?**
-No, it is the whole register. Filter it in Excel or in your flow if you need only new rows.
+No, it is the whole register. Filter it in Excel or in your flow if you need only new rows, or
+call `POST /api/v1/reset` at the start of each run so the register only ever holds that run's
+documents.
+
+**I reset by mistake. Can I get the data back?**
+No. The API does not keep a backup. Re-upload and re-process the original documents to rebuild the
+register.
 
 **How big can a batch be?**
 There is no limit on the number of files, but each file must be under 20 MB and the whole request
