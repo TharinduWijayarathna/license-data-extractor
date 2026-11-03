@@ -41,6 +41,7 @@ final class Config
         'LICENCE_LOG_FILE' => 'licences.log_file',
         'LICENCE_QUEUE_DISPATCH' => 'licences.queue.dispatch',
         'LICENCE_PHP_BINARY' => 'licences.queue.php_binary',
+        'API_KEYS' => 'api.keys',
     ];
 
     /**

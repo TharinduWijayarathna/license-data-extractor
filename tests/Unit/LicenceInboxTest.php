@@ -46,6 +46,22 @@ class LicenceInboxTest extends TestCase
         );
     }
 
+    public function testStoreContentsAppliesTheSameChecks(): void
+    {
+        $inbox = new LicenceInbox($this->dir, 1048576);
+
+        $this->assertSame('api.pdf', $inbox->storeContents('../api.pdf', '%PDF-1.7 body'));
+        $this->assertSame('%PDF-1.7 body', file_get_contents($this->dir . '/api.pdf'));
+
+        try {
+            $inbox->storeContents('fake.pdf', '<?php echo 1;');
+            $this->fail('Spoofed content must be rejected');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('not a valid .pdf', $e->getMessage());
+        }
+        $this->assertSame(['api.pdf'], array_column($inbox->pending(), 'name'));
+    }
+
     /**
      * @return array<string,array{0:string,1:string,2:int,3:int,4:string}>
      */

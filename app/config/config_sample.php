@@ -68,6 +68,11 @@ return [
             'stale_after' => 900,
         ],
     ],
+    'api' => [
+        // Secret: set API_KEYS in .env (comma-separated, one per integration).
+        // Empty = the /api/v1 endpoints are disabled.
+        'keys' => '',
+    ],
     'runway' => [
         'index_root' => 'public/index.php',
         'app_root' => 'app/',
