@@ -21,9 +21,6 @@ use flight\commands\AbstractBaseCommand;
  */
 class ProcessLicencesCommand extends AbstractBaseCommand
 {
-    /** Wait for retries that become due within this many seconds before exiting. */
-    private const MAX_RETRY_WAIT = 300;
-
     /**
      * @param array<string,mixed> $config From .runway-config.json
      */
@@ -61,19 +58,10 @@ class ProcessLicencesCommand extends AbstractBaseCommand
         }
 
         $worker = new LicenceWorker($agent, $queue);
-        $totals = ['processed' => 0, 'failed' => 0, 'retrying' => 0, 'added' => 0, 'duplicates' => 0];
         try {
-            do {
-                foreach ($worker->drain() as $key => $value) {
-                    $totals[$key] += $value;
-                }
-                // Wait for back-offs that are due soon instead of leaving them for the next run
-                $dueIn = $queue->nextDueIn();
-                if ($dueIn !== null && $dueIn > 0 && $dueIn <= self::MAX_RETRY_WAIT) {
-                    $io->comment("Waiting {$dueIn}s for a retry…", true);
-                    sleep($dueIn);
-                }
-            } while ($dueIn !== null && $dueIn <= self::MAX_RETRY_WAIT);
+            $totals = $worker->drainUntilIdle(LicenceWorker::MAX_RETRY_WAIT, static function (int $seconds) use ($io): void {
+                $io->comment("Waiting {$seconds}s for a retry…", true);
+            });
         } finally {
             $agent->unlock();
         }

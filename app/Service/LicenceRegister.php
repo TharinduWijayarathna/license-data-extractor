@@ -31,9 +31,18 @@ class LicenceRegister
     /** @var bool */
     private $queueResolved = false;
 
-    public function __construct(Config $config)
+    /** @var \Closure(callable): void Runs a callback after the HTTP response is sent */
+    private $afterResponse;
+
+    /**
+     * @param (\Closure(callable): void)|null $afterResponse Defaults to register_shutdown_function (tests inject a spy)
+     */
+    public function __construct(Config $config, ?\Closure $afterResponse = null)
     {
         $this->config = $config;
+        $this->afterResponse = $afterResponse ?? static function (callable $callback): void {
+            register_shutdown_function($callback);
+        };
     }
 
     public function inbox(): LicenceInbox
@@ -147,7 +156,17 @@ class LicenceRegister
         if ($this->isProcessing()) {
             return self::RUN_ALREADY_RUNNING;
         }
-        if ((string) $this->config->get('licences.queue.dispatch', 'background') !== 'background') {
+        $mode = (string) $this->config->get('licences.queue.dispatch', 'background');
+        if ($mode === 'inline') {
+            // Process in this PHP process once the response is out — no exec(), for hosts that block it
+            $config = $this->config;
+            ($this->afterResponse)(static function () use ($config): void {
+                LicenceInlineRunner::afterResponse($config);
+            });
+
+            return self::RUN_STARTED;
+        }
+        if ($mode !== 'background') {
             return self::RUN_DEFERRED;
         }
 

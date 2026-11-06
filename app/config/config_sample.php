@@ -56,7 +56,9 @@ return [
         'max_upload_mb' => 20,
         // Job queue (needs the database + `php runway migrate`; without it runs are synchronous)
         'queue' => [
-            // background: web uploads start a detached `licences:process` run
+            // background: web uploads start a detached `licences:process` run (uses exec)
+            // inline: process in the web request's PHP after the response is sent (no exec / cron;
+            //         use on shared hosting such as cPanel where Imunify360 blocks exec)
             // none: leave jobs for `licences:work` or the cron schedule
             'dispatch' => 'background',
             // CLI php used for background runs ('' = auto-detect)

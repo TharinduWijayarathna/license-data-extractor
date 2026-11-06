@@ -1,4 +1,11 @@
 RewriteEngine On
+
+# LiteSpeed: let "process" requests keep running after the response is sent
+# (licences.queue.dispatch = inline) instead of being aborted with the connection
+<IfModule LiteSpeed>
+RewriteRule ^(api/v1/)?process$ - [E=noabort:1,E=noconntimeout:1]
+</IfModule>
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ index.php [QSA,L]

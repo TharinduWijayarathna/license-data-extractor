@@ -183,6 +183,26 @@ class ApiControllerTest extends TestCase
         $this->assertStringContainsString('worker or scheduled run', $process['body']['message']);
     }
 
+    public function testInlineDispatchRunsAfterTheResponseWithoutExec(): void
+    {
+        $data = $this->queueConfig()->all();
+        $data['licences']['queue'] = ['dispatch' => 'inline'];
+        $config = new Config($data);
+        touch($this->dir . '/incoming/a.pdf');
+        $deferred = [];
+
+        $response = $this->call('process', $config, [], function (callable $callback) use (&$deferred): void {
+            $deferred[] = $callback;
+        });
+
+        $this->assertSame(202, $response['status']);
+        $this->assertSame('processing', $response['body']['status']);
+        $this->assertStringContainsString('Processing started', $response['body']['message']);
+        $this->assertCount(1, $deferred, 'one run scheduled for after the response');
+        // Nothing ran during the request itself
+        $this->assertSame(1, $this->call('status', $config)['body']['counts']['queued']);
+    }
+
     public function testResetRequiresConfirmation(): void
     {
         touch($this->dir . '/incoming/a.pdf');
@@ -250,9 +270,10 @@ class ApiControllerTest extends TestCase
      * Invoke one controller action against a fresh Engine.
      *
      * @param array<mixed> $json Request body (sent as application/json)
+     * @param (\Closure(callable): void)|null $afterResponse
      * @return array{status:int, body:array<string,mixed>, headers:array<string,string>, raw:string}
      */
-    private function call(string $action, Config $config, array $json = []): array
+    private function call(string $action, Config $config, array $json = [], ?\Closure $afterResponse = null): array
     {
         $app = new Engine();
         $app->request()->type = 'application/json';
@@ -263,7 +284,7 @@ class ApiControllerTest extends TestCase
             $captured = [$data, $code];
         });
 
-        (new ApiController($app, new LicenceRegister($config)))->{$action}();
+        (new ApiController($app, new LicenceRegister($config, $afterResponse)))->{$action}();
 
         $headers = [];
         foreach ($app->response()->getHeaders() as $name => $value) {

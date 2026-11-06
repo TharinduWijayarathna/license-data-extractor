@@ -67,7 +67,10 @@ The API is **off** until at least one key is configured.
    ```
 
 3. Make sure documents actually get processed after step 2. With the default settings the server
-   starts a background run automatically. If you set `LICENCE_QUEUE_DISPATCH=none`, keep the worker
+   starts a background run automatically. On shared hosting (cPanel / LiteSpeed) where the
+   security layer blocks PHP from starting processes — `POST /process` then fails with an HTML
+   `403 Forbidden` page — set `LICENCE_QUEUE_DISPATCH=inline`: the request returns `202` at once and
+   the same PHP process works through the queue afterwards. If you set `LICENCE_QUEUE_DISPATCH=none`, keep the worker
    running (`php runway licences:work`), otherwise documents wait for the next scheduled run.
 
 To revoke a key, remove it from `API_KEYS`. The change takes effect on the next request.

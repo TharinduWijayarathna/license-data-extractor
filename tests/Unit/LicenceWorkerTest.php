@@ -65,6 +65,40 @@ class LicenceWorkerTest extends TestCase
         $this->assertStringContainsString('ERROR bad.pdf: HTTP 503', $log);
     }
 
+    public function testDrainUntilIdleWaitsForDueRetries(): void
+    {
+        touch($this->root . '/incoming/bad.pdf');
+        [$agent, $queue] = $this->build(['bad.pdf' => new RuntimeException('HTTP 503')], 2);
+        $waits = [];
+
+        $summary = (new LicenceWorker($agent, $queue))->drainUntilIdle(
+            300,
+            function (int $seconds) use (&$waits): void {
+                $waits[] = $seconds;
+            },
+            function (int $seconds): void {
+                $this->now += $seconds;
+            }
+        );
+
+        $this->assertSame([60], $waits, 'waited once for the back-off instead of exiting');
+        $this->assertSame(1, $summary['retrying']);
+        $this->assertSame(1, $summary['failed']);
+    }
+
+    public function testDrainUntilIdleLeavesDistantRetriesForLater(): void
+    {
+        touch($this->root . '/incoming/bad.pdf');
+        [$agent, $queue] = $this->build(['bad.pdf' => new RuntimeException('HTTP 503')]);
+
+        $summary = (new LicenceWorker($agent, $queue))->drainUntilIdle(30, null, function (): void {
+            $this->fail('must not sleep for a retry beyond the limit');
+        });
+
+        $this->assertSame(1, $summary['retrying']);
+        $this->assertSame('queued', $queue->activeJobs()['bad.pdf']['status']);
+    }
+
     public function testDeletedDocumentFailsWithoutRetrying(): void
     {
         [$agent, $queue] = $this->build([]);

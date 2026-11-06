@@ -14,6 +14,9 @@ use Throwable;
  */
 final class LicenceWorker
 {
+    /** One-shot runs wait for retries that become due within this many seconds before exiting. */
+    public const MAX_RETRY_WAIT = 300;
+
     /** @var LicenceAgent */
     private $agent;
 
@@ -55,6 +58,38 @@ final class LicenceWorker
         }
 
         return $summary;
+    }
+
+    /**
+     * Drain the queue, waiting for retry back-offs that fall due within
+     * $maxRetryWait seconds instead of leaving them for the next run.
+     * The caller must hold the agent's processor lock.
+     *
+     * @param (callable(int): void)|null $onWait Called with the seconds about to be slept
+     * @param (callable(int): void)|null $sleep  Override for sleep() (tests)
+     * @return array{processed:int, failed:int, retrying:int, added:int, duplicates:int}
+     */
+    public function drainUntilIdle(int $maxRetryWait, ?callable $onWait = null, ?callable $sleep = null): array
+    {
+        $totals = ['processed' => 0, 'failed' => 0, 'retrying' => 0, 'added' => 0, 'duplicates' => 0];
+        $sleep = $sleep ?? static function (int $seconds): void {
+            sleep($seconds);
+        };
+
+        do {
+            foreach ($this->drain() as $key => $value) {
+                $totals[$key] += $value;
+            }
+            $dueIn = $this->queue->nextDueIn();
+            if ($dueIn !== null && $dueIn > 0 && $dueIn <= $maxRetryWait) {
+                if ($onWait !== null) {
+                    $onWait($dueIn);
+                }
+                $sleep($dueIn);
+            }
+        } while ($dueIn !== null && $dueIn <= $maxRetryWait);
+
+        return $totals;
     }
 
     /**

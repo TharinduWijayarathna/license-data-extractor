@@ -145,9 +145,10 @@ Set these in `.env`; defaults live in `app/config/config.php` (`gemini.*`, `lice
 | `LICENCE_PROCESSED_DIR` | `storage/licences/processed` | Documents already processed |
 | `LICENCE_MASTER_XLSX` | `storage/licences/Master_Licences.xlsx` | The register workbook |
 | `LICENCE_LOG_FILE` | `app/log/licence_agent.log` | Activity / error log |
-| `LICENCE_QUEUE_DISPATCH` | `background` | `background`: uploads start a run; `none`: leave jobs to the worker / schedule |
+| `LICENCE_QUEUE_DISPATCH` | `background` | `background`: uploads start a detached run (`exec`); `inline`: process in the web request after the response is sent (shared hosting / cPanel, where `exec` is blocked); `none`: leave jobs to the worker / schedule |
 | `LICENCE_PHP_BINARY` | auto | CLI `php` used for background runs, if auto-detection picks the wrong one |
-| `DB_DRIVER` / `DB_SQLITE_PATH` | `sqlite` / `database.sqlite` | Queue database (`mysql` supported, see `DB_*`) |
+| `DB_DRIVER` / `DB_SQLITE_PATH` | `sqlite` / `database.sqlite` | Queue database (`mysql` supported, see below) |
+| `DB_HOST` / `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD` | (none) | MySQL connection, when `DB_DRIVER=mysql` |
 | `APP_TIMEZONE` | `UTC` | e.g. `Asia/Colombo`, used for log times and expiry checks |
 | `APP_DEBUG` | `true` | Set `false` in production (hides the debug bar and error details) |
 
